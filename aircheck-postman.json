@@ -1,0 +1,55 @@
+{
+  "info": {
+    "name": "AirCheck API Tests",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8000/health",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["health"]
+        }
+      }
+    },
+    {
+      "name": "Search Places - São Paulo",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8000/places/search?q=São Paulo",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["places", "search"],
+          "query": [{"key": "q", "value": "São Paulo"}]
+        }
+      }
+    },
+    {
+      "name": "Get AQI - São Paulo",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8000/aqi/current?lat=-23.55&lng=-46.63",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["aqi", "current"],
+          "query": [
+            {"key": "lat", "value": "-23.55"},
+            {"key": "lng", "value": "-46.63"}
+          ]
+        }
+      }
+    }
+  ]
+}

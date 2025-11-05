@@ -4,8 +4,10 @@ from datetime import datetime
 from typing import Optional, Dict, List
 import httpx
 import os
-from functools import lru_cache
+from dotenv import load_dotenv
 import time
+
+load_dotenv()
 
 app = FastAPI(title="AirCheck API", version="2.0.0")
 
@@ -17,9 +19,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cache
+# Cache simples com TTL
 cache_store: Dict[str, tuple] = {}
-CACHE_TTL = 300
+CACHE_TTL = 300  # 5 minutos
 
 def get_from_cache(key: str):
     if key in cache_store:
@@ -32,42 +34,17 @@ def get_from_cache(key: str):
 def set_cache(key: str, data):
     cache_store[key] = (data, time.time())
 
-# ==================== CLIENTES DE API ====================
-
-class OpenMeteoClient:
-    """Open-Meteo Air Quality API - SEM CHAVE NECESSÁRIA!"""
-    BASE_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
-    
-    async def get_air_quality(self, lat: float, lng: float) -> Optional[Dict]:
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(
-                    self.BASE_URL,
-                    params={
-                        "latitude": lat,
-                        "longitude": lng,
-                        "current": "pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,european_aqi",
-                        "timezone": "auto"
-                    },
-                    timeout=10.0
-                )
-                response.raise_for_status()
-                return response.json()
-            except Exception as e:
-                print(f"Open-Meteo error: {e}")
-                return None
+# ==================== CLIENTE WAQI ====================
 
 class WAQIClient:
-    """World Air Quality Index - Requer token gratuito"""
+    """World Air Quality Index API Client"""
     BASE_URL = "https://api.waqi.info"
     
-    def __init__(self, token: Optional[str]):
+    def __init__(self, token: str):
         self.token = token
     
     async def get_by_coords(self, lat: float, lng: float) -> Optional[Dict]:
-        if not self.token:
-            return None
-            
+        """Busca estação mais próxima das coordenadas"""
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
@@ -82,83 +59,29 @@ class WAQIClient:
                     return data.get("data")
                 return None
             except Exception as e:
-                print(f"WAQI error: {e}")
+                print(f"❌ WAQI error: {e}")
                 return None
-
-class OpenWeatherClient:
-    BASE_URL = "http://api.openweathermap.org/data/2.5"
     
-    def __init__(self, api_key: Optional[str]):
-        self.api_key = api_key
-    
-    async def get_air_pollution(self, lat: float, lng: float) -> Optional[Dict]:
-        if not self.api_key:
-            return None
-            
+    async def search_by_name(self, city_name: str) -> Optional[Dict]:
+        """Busca por nome da cidade"""
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
-                    f"{self.BASE_URL}/air_pollution",
-                    params={"lat": lat, "lon": lng, "appid": self.api_key},
-                    timeout=10.0
-                )
-                response.raise_for_status()
-                return response.json()
-            except Exception as e:
-                print(f"OpenWeather error: {e}")
-                return None
-
-class APINinjasClient:
-    """API Ninjas Air Quality"""
-    BASE_URL = "https://api.api-ninjas.com/v1/airquality"
-    
-    def __init__(self, api_key: Optional[str]):
-        self.api_key = api_key
-    
-    async def get_air_quality(self, lat: float, lng: float) -> Optional[Dict]:
-        if not self.api_key:
-            return None
-            
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(
-                    self.BASE_URL,
-                    params={"lat": lat, "lon": lng},
-                    headers={"X-Api-Key": self.api_key},
-                    timeout=10.0
-                )
-                response.raise_for_status()
-                return response.json()
-            except Exception as e:
-                print(f"API Ninjas error: {e}")
-                return None
-
-class OpenAQClient:
-    BASE_URL = "https://api.openaq.org/v2"
-    
-    async def get_latest(self, lat: float, lng: float, radius: int = 25000) -> Optional[Dict]:
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(
-                    f"{self.BASE_URL}/latest",
-                    params={
-                        "coordinates": f"{lat},{lng}",
-                        "radius": radius,
-                        "limit": 1,
-                        "order_by": "distance"
-                    },
+                    f"{self.BASE_URL}/search/",
+                    params={"token": self.token, "keyword": city_name},
                     timeout=10.0
                 )
                 response.raise_for_status()
                 data = response.json()
                 
-                if data.get("results") and len(data["results"]) > 0:
-                    return data["results"][0]
+                if data.get("status") == "ok":
+                    return data.get("data", [])
                 return None
             except Exception as e:
-                print(f"OpenAQ error: {e}")
+                print(f"❌ WAQI search error: {e}")
                 return None
 
+# Cliente de Geocodificação (Nominatim - gratuito, sem chave)
 class NominatimClient:
     BASE_URL = "https://nominatim.openstreetmap.org"
     
@@ -167,7 +90,7 @@ class NominatimClient:
             try:
                 response = await client.get(
                     f"{self.BASE_URL}/search",
-                    params={"q": query, "format": "json", "limit": 5},
+                    params={"q": query, "format": "json", "limit": 10},
                     headers={"User-Agent": "AirCheck/2.0"},
                     timeout=10.0
                 )
@@ -175,18 +98,25 @@ class NominatimClient:
                 results = response.json()
                 return [
                     {
-                        "name": r.get("display_name", ""),
+                        "name": r.get("display_name", "")
+                            .split(",")[0]  # pega só o primeiro nome (mais limpo)
+                            .encode("ascii", errors="ignore")
+                            .decode("ascii"),  # remove caracteres não ASCII
                         "lat": float(r["lat"]),
                         "lng": float(r["lon"])
                     }
                     for r in results
                 ]
-            except Exception:
+            except Exception as e:
+                print(f"❌ Nominatim error: {e}")
                 return []
 
 # ==================== SERVIÇO DE AQI ====================
 
 class AqiService:
+    """Serviço para processar dados de AQI"""
+    
+    # Tabela de categorias AQI (US EPA)
     AQI_BREAKPOINTS = [
         (0, 50, "Bom"),
         (51, 100, "Moderado"),
@@ -198,176 +128,104 @@ class AqiService:
     
     @staticmethod
     def calculate_category(aqi: int) -> str:
+        """Calcula categoria baseado no valor AQI"""
         for low, high, category in AqiService.AQI_BREAKPOINTS:
             if low <= aqi <= high:
                 return category
         return "Perigoso"
     
     @staticmethod
-    def normalize_open_meteo(data: Dict, lat: float, lng: float) -> Dict:
-        """Normaliza dados do Open-Meteo"""
-        current = data.get("current", {})
-        aqi = current.get("european_aqi", 50)
+    def normalize_waqi_data(data: Dict) -> Dict:
+        """
+        Normaliza dados do WAQI para formato padrão
         
-        # Converter µg/m³ para os valores esperados
-        pollutants = {
-            "pm25": current.get("pm2_5"),
-            "pm10": current.get("pm10"),
-            "o3": current.get("ozone"),
-            "no2": current.get("nitrogen_dioxide"),
-            "so2": current.get("sulphur_dioxide"),
-            "co": current.get("carbon_monoxide", 0) / 1000 if current.get("carbon_monoxide") else None
-        }
-        
-        return {
-            "aqi": int(aqi),
-            "category": AqiService.calculate_category(int(aqi)),
-            "pollutants": pollutants,
-            "location": {
-                "lat": lat,
-                "lng": lng,
-                "label": f"Lat {lat:.2f}, Lng {lng:.2f}"
+        Estrutura do WAQI:
+        {
+            "aqi": 72,
+            "idx": 12345,
+            "city": {
+                "name": "São Paulo",
+                "geo": [-23.55, -46.63],
+                "url": "..."
             },
-            "source": "open-meteo",
-            "timestamp": current.get("time", datetime.utcnow().isoformat()) + "Z"
-        }
-    
-    @staticmethod
-    def normalize_waqi(data: Dict) -> Dict:
-        """Normaliza dados do WAQI"""
-        aqi = data.get("aqi", 50)
-        iaqi = data.get("iaqi", {})
-        city = data.get("city", {})
-        
-        pollutants = {
-            "pm25": iaqi.get("pm25", {}).get("v"),
-            "pm10": iaqi.get("pm10", {}).get("v"),
-            "o3": iaqi.get("o3", {}).get("v"),
-            "no2": iaqi.get("no2", {}).get("v"),
-            "so2": iaqi.get("so2", {}).get("v"),
-            "co": iaqi.get("co", {}).get("v")
-        }
-        
-        location_name = city.get("name", "Unknown")
-        geo = city.get("geo", [0, 0])
-        
-        return {
-            "aqi": int(aqi),
-            "category": AqiService.calculate_category(int(aqi)),
-            "pollutants": pollutants,
-            "location": {
-                "lat": geo[0] if len(geo) > 0 else 0,
-                "lng": geo[1] if len(geo) > 1 else 0,
-                "label": location_name
+            "iaqi": {
+                "pm25": {"v": 21.3},
+                "pm10": {"v": 38.9},
+                "o3": {"v": 64.0},
+                "no2": {"v": 14.1},
+                "so2": {"v": 2.0},
+                "co": {"v": 0.4}
             },
-            "source": "waqi",
-            "timestamp": data.get("time", {}).get("iso", datetime.utcnow().isoformat()) + "Z"
+            "time": {
+                "s": "2025-11-05 12:00:00",
+                "tz": "-03:00",
+                "v": 1730815200,
+                "iso": "2025-11-05T12:00:00-03:00"
+            }
         }
-    
-    @staticmethod
-    def normalize_api_ninjas(data: Dict, lat: float, lng: float) -> Dict:
-        """Normaliza dados do API Ninjas"""
-        aqi = data.get("overall_aqi", 50)
-        
-        pollutants = {
-            "pm25": data.get("PM2.5", {}).get("concentration"),
-            "pm10": data.get("PM10", {}).get("concentration"),
-            "o3": data.get("O3", {}).get("concentration"),
-            "no2": data.get("NO2", {}).get("concentration"),
-            "so2": data.get("SO2", {}).get("concentration"),
-            "co": data.get("CO", {}).get("concentration", 0) / 1000 if data.get("CO") else None
-        }
-        
-        return {
-            "aqi": int(aqi),
-            "category": AqiService.calculate_category(int(aqi)),
-            "pollutants": pollutants,
-            "location": {
-                "lat": lat,
-                "lng": lng,
-                "label": f"Lat {lat:.2f}, Lng {lng:.2f}"
-            },
-            "source": "api-ninjas",
-            "timestamp": datetime.utcnow().isoformat() + "Z"
-        }
-    
-    @staticmethod
-    def normalize_openweather(data: Dict, lat: float, lng: float) -> Dict:
-        """Normaliza dados do OpenWeather"""
-        components = data.get("list", [{}])[0].get("components", {})
-        aqi_value = data.get("list", [{}])[0].get("main", {}).get("aqi", 1)
-        
-        aqi_map = {1: 25, 2: 75, 3: 125, 4: 175, 5: 250}
-        aqi = aqi_map.get(aqi_value, 50)
-        
-        pollutants = {
-            "pm25": components.get("pm2_5"),
-            "pm10": components.get("pm10"),
-            "o3": components.get("o3"),
-            "no2": components.get("no2"),
-            "so2": components.get("so2"),
-            "co": components.get("co", 0) / 1000 if components.get("co") else None
-        }
-        
-        return {
-            "aqi": aqi,
-            "category": AqiService.calculate_category(aqi),
-            "pollutants": pollutants,
-            "location": {
-                "lat": lat,
-                "lng": lng,
-                "label": f"Lat {lat:.2f}, Lng {lng:.2f}"
-            },
-            "source": "openweather",
-            "timestamp": datetime.utcfromtimestamp(data.get("list", [{}])[0].get("dt", time.time())).isoformat() + "Z"
-        }
-    
-    @staticmethod
-    def normalize_openaq(data: Dict) -> Dict:
-        """Normaliza dados do OpenAQ"""
-        pollutants = {"pm25": None, "pm10": None, "o3": None, "no2": None, "so2": None, "co": None}
-        
-        for measurement in data.get("measurements", []):
-            param = measurement.get("parameter", "").lower()
-            value = measurement.get("value")
+        """
+        try:
+            aqi = data.get("aqi", 0)
             
-            if param in pollutants and value is not None:
-                pollutants[param] = float(value)
-        
-        pm25 = pollutants.get("pm25")
-        if pm25 is not None:
-            if pm25 <= 12.0:
-                aqi = int(pm25 * 50 / 12.0)
-            elif pm25 <= 35.4:
-                aqi = int(50 + (pm25 - 12.0) * 50 / 23.4)
-            elif pm25 <= 55.4:
-                aqi = int(100 + (pm25 - 35.4) * 50 / 20.0)
-            elif pm25 <= 150.4:
-                aqi = int(150 + (pm25 - 55.4) * 50 / 95.0)
-            else:
-                aqi = int(200 + min((pm25 - 150.4) * 100 / 100.0, 300))
-        else:
-            aqi = 50
-        
-        location_name = data.get("location", "")
-        country = data.get("country", "")
-        
-        return {
-            "aqi": aqi,
-            "category": AqiService.calculate_category(aqi),
-            "pollutants": pollutants,
-            "location": {
-                "lat": data["coordinates"]["latitude"],
-                "lng": data["coordinates"]["longitude"],
-                "label": f"{location_name}, {country}" if location_name else f"{country}"
-            },
-            "source": "openaq",
-            "timestamp": data.get("measurements", [{}])[0].get("lastUpdated", datetime.utcnow().isoformat() + "Z")
-        }
+            # Se AQI for string (às vezes vem "-"), converter
+            if isinstance(aqi, str):
+                if aqi == "-":
+                    aqi = 0
+                else:
+                    try:
+                        aqi = int(aqi)
+                    except:
+                        aqi = 0
+            
+            # Extrair poluentes individuais (iaqi = Individual Air Quality Index)
+            iaqi = data.get("iaqi", {})
+            
+            pollutants = {
+                "pm25": iaqi.get("pm25", {}).get("v"),
+                "pm10": iaqi.get("pm10", {}).get("v"),
+                "o3": iaqi.get("o3", {}).get("v"),
+                "no2": iaqi.get("no2", {}).get("v"),
+                "so2": iaqi.get("so2", {}).get("v"),
+                "co": iaqi.get("co", {}).get("v")
+            }
+            
+            # Informações da cidade
+            city = data.get("city", {})
+            city_name = city.get("name", "Desconhecido")
+            geo = city.get("geo", [0, 0])
+            
+            # Timestamp
+            time_info = data.get("time", {})
+            timestamp = time_info.get("iso", datetime.utcnow().isoformat() + "Z")
+            
+            # Estação de monitoramento
+            station_info = ""
+            if city.get("url"):
+                station_info = f" (Estação: {city.get('url', '').split('/')[-2]})"
+            
+            return {
+                "aqi": int(aqi),
+                "category": AqiService.calculate_category(int(aqi)),
+                "pollutants": pollutants,
+                "location": {
+                    "lat": geo[0] if len(geo) > 0 else 0,
+                    "lng": geo[1] if len(geo) > 1 else 0,
+                    "label": f"{city_name}{station_info}"
+                },
+                "source": "waqi",
+                "timestamp": timestamp,
+                "attribution": "Data provided by the World Air Quality Index project (https://waqi.info)"
+            }
+        except Exception as e:
+            print(f"❌ Error normalizing WAQI data: {e}")
+            raise HTTPException(status_code=500, detail="Erro ao processar dados da API")
     
     @staticmethod
-    def generate_mock(lat: float, lng: float) -> Dict:
-        """Mock determinístico"""
+    def generate_mock_data(lat: float, lng: float) -> Dict:
+        """
+        Gera dados mock determinísticos quando WAQI não tem dados
+        (usado apenas quando não há token ou API não responde)
+        """
         import hashlib
         seed = int(hashlib.md5(f"{lat:.2f},{lng:.2f}".encode()).hexdigest(), 16) % 100
         aqi = 50 + seed
@@ -383,99 +241,196 @@ class AqiService:
                 "so2": 2.0 + (seed * 0.05),
                 "co": 0.3 + (seed * 0.01)
             },
-            "location": {"lat": lat, "lng": lng, "label": f"Lat {lat:.2f}, Lng {lng:.2f}"},
+            "location": {
+                "lat": lat,
+                "lng": lng,
+                "label": f"Lat {lat:.2f}, Lng {lng:.2f}"
+            },
             "source": "mock",
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "attribution": "Mock data - Configure WAQI_API_KEY for real data"
         }
 
-# Instâncias
-open_meteo = OpenMeteoClient()
-waqi = WAQIClient(os.getenv("WAQI_API_KEY"))
-openweather = OpenWeatherClient(os.getenv("OPENWEATHER_API_KEY"))
-api_ninjas = APINinjasClient(os.getenv("API_NINJAS_KEY"))
-openaq = OpenAQClient()
+# ==================== INSTÂNCIAS ====================
+
+WAQI_TOKEN = os.getenv("WAQI_API_KEY")
+
+if not WAQI_TOKEN:
+    print("⚠️  WARNING: WAQI_API_KEY não configurado!")
+    print("📝 Obtenha seu token gratuito em: https://aqicn.org/data-platform/token/")
+    print("💡 O sistema funcionará com dados mock até você configurar a chave.")
+
+waqi = WAQIClient(WAQI_TOKEN) if WAQI_TOKEN else None
 nominatim = NominatimClient()
 aqi_service = AqiService()
 
 # ==================== ROTAS ====================
 
+@app.get("/")
+async def root():
+    """Rota raiz com informações da API"""
+    return {
+        "name": "AirCheck API",
+        "version": "2.0.0",
+        "status": "online",
+        "waqi_configured": bool(WAQI_TOKEN),
+        "endpoints": {
+            "health": "/health",
+            "places": "/places/search?q=<cidade>",
+            "aqi": "/aqi/current?lat=<lat>&lng=<lng>",
+            "docs": "/docs"
+        },
+        "message": "Configure WAQI_API_KEY no .env para dados reais" if not WAQI_TOKEN else "WAQI configurado!"
+    }
+
 @app.get("/health")
 async def health_check():
-    apis_configured = {
-        "open_meteo": True,  # Sempre disponível
-        "waqi": bool(os.getenv("WAQI_API_KEY")),
-        "openweather": bool(os.getenv("OPENWEATHER_API_KEY")),
-        "api_ninjas": bool(os.getenv("API_NINJAS_KEY")),
-        "openaq": True  # Sempre disponível
-    }
+    """Verificação de saúde do sistema"""
     return {
         "status": "ok",
-        "apis": apis_configured,
-        "cache_size": len(cache_store)
+        "waqi_configured": bool(WAQI_TOKEN),
+        "cache_size": len(cache_store),
+        "message": "Obtenha token em https://aqicn.org/data-platform/token/" if not WAQI_TOKEN else "Sistema operacional"
     }
 
 @app.get("/places/search")
-async def search_places(q: str = Query(..., min_length=1)):
+async def search_places(q: str = Query(..., min_length=1, description="Nome da cidade para buscar")):
+    """
+    Busca lugares por nome usando Nominatim (OpenStreetMap)
+    
+    Exemplo: /places/search?q=São Paulo
+    """
     cache_key = f"place:{q}"
     cached = get_from_cache(cache_key)
     if cached:
         return cached
     
     results = await nominatim.search(q)
+    
+    if not results:
+        raise HTTPException(status_code=404, detail="Nenhum local encontrado")
+    
     set_cache(cache_key, results)
     return results
 
 @app.get("/aqi/current")
 async def get_current_aqi(
-    lat: float = Query(..., ge=-90, le=90),
-    lng: float = Query(..., ge=-180, le=180)
+    lat: float = Query(..., ge=-90, le=90, description="Latitude"),
+    lng: float = Query(..., ge=-180, le=180, description="Longitude")
 ):
+    """
+    Obtém dados de qualidade do ar para coordenadas específicas
+    
+    Usa a API WAQI (World Air Quality Index)
+    
+    Exemplo: /aqi/current?lat=-23.55&lng=-46.63
+    """
+    # Verificar cache
     cache_key = f"aqi:{lat:.4f},{lng:.4f}"
     cached = get_from_cache(cache_key)
     if cached:
         return cached
     
-    # Estratégia: tentar na ordem de prioridade
-    
-    # 1. Open-Meteo (sem chave, sempre funciona)
-    data = await open_meteo.get_air_quality(lat, lng)
-    if data:
-        result = aqi_service.normalize_open_meteo(data, lat, lng)
+    # Se não tem token WAQI, retorna mock
+    if not waqi:
+        print("⚠️  Usando dados mock - Configure WAQI_API_KEY")
+        result = aqi_service.generate_mock_data(lat, lng)
         set_cache(cache_key, result)
         return result
     
-    # 2. WAQI (se configurado)
-    data = await waqi.get_by_coords(lat, lng)
-    if data:
-        result = aqi_service.normalize_waqi(data)
+    # Tentar obter dados do WAQI
+    try:
+        waqi_data = await waqi.get_by_coords(lat, lng)
+        
+        if waqi_data:
+            result = aqi_service.normalize_waqi_data(waqi_data)
+            set_cache(cache_key, result)
+            return result
+        else:
+            # WAQI não tem dados para esta localização
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Nenhuma estação de monitoramento encontrada próxima a {lat}, {lng}. Tente coordenadas de grandes cidades."
+            )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Erro ao consultar WAQI: {e}")
+        # Se houver erro na API, retorna mock como fallback
+        result = aqi_service.generate_mock_data(lat, lng)
+        result["error"] = "Erro ao acessar API WAQI - usando dados mock"
         set_cache(cache_key, result)
         return result
+
+@app.get("/aqi/search")
+async def search_aqi_by_city(
+    city: str = Query(..., min_length=2, description="Nome da cidade")
+):
+    """
+    Busca AQI diretamente pelo nome da cidade usando WAQI
     
-    # 3. API Ninjas (se configurado)
-    data = await api_ninjas.get_air_quality(lat, lng)
-    if data:
-        result = aqi_service.normalize_api_ninjas(data, lat, lng)
-        set_cache(cache_key, result)
-        return result
+    Exemplo: /aqi/search?city=Beijing
+    """
+    if not waqi:
+        raise HTTPException(
+            status_code=503, 
+            detail="WAQI_API_KEY não configurado. Obtenha em https://aqicn.org/data-platform/token/"
+        )
     
-    # 4. OpenWeather (se configurado)
-    data = await openweather.get_air_pollution(lat, lng)
-    if data:
-        result = aqi_service.normalize_openweather(data, lat, lng)
-        set_cache(cache_key, result)
-        return result
+    cache_key = f"aqi:search:{city}"
+    cached = get_from_cache(cache_key)
+    if cached:
+        return cached
     
-    # 5. OpenAQ (sem chave)
-    data = await openaq.get_latest(lat, lng)
-    if data:
-        result = aqi_service.normalize_openaq(data)
-        set_cache(cache_key, result)
-        return result
+    try:
+        results = await waqi.search_by_name(city)
+        
+        if not results or len(results) == 0:
+            raise HTTPException(status_code=404, detail=f"Nenhuma estação encontrada para '{city}'")
+        
+        # Processar resultados
+        processed = []
+        for station in results[:5]:  # Limitar a 5 resultados
+            if station.get("aqi") and station.get("aqi") != "-":
+                processed.append({
+                    "station_name": station.get("station", {}).get("name", "Unknown"),
+                    "aqi": int(station.get("aqi")) if isinstance(station.get("aqi"), (int, str)) else 0,
+                    "url": station.get("station", {}).get("url", "")
+                })
+        
+        set_cache(cache_key, processed)
+        return processed
     
-    # 6. Mock como último recurso
-    result = aqi_service.generate_mock(lat, lng)
-    set_cache(cache_key, result)
-    return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Erro ao buscar cidade: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao buscar dados: {str(e)}")
+
+# ==================== INFORMAÇÕES ADICIONAIS ====================
+
+@app.get("/info/categories")
+async def get_aqi_categories():
+    """Retorna as categorias de AQI e seus ranges"""
+    return {
+        "categories": [
+            {"range": "0-50", "name": "Bom", "color": "green", "description": "Qualidade do ar satisfatória"},
+            {"range": "51-100", "name": "Moderado", "color": "yellow", "description": "Qualidade aceitável"},
+            {"range": "101-150", "name": "Insalubre para Grupos Sensíveis", "color": "orange", "description": "Grupos sensíveis podem ter efeitos"},
+            {"range": "151-200", "name": "Insalubre", "color": "red", "description": "Todos podem começar a ter efeitos"},
+            {"range": "201-300", "name": "Muito Insalubre", "color": "purple", "description": "Alerta de saúde"},
+            {"range": "301+", "name": "Perigoso", "color": "maroon", "description": "Emergência de saúde"}
+        ],
+        "pollutants": {
+            "pm25": {"name": "PM2.5", "unit": "µg/m³", "description": "Partículas finas"},
+            "pm10": {"name": "PM10", "unit": "µg/m³", "description": "Partículas inaláveis"},
+            "o3": {"name": "O₃", "unit": "µg/m³", "description": "Ozônio"},
+            "no2": {"name": "NO₂", "unit": "µg/m³", "description": "Dióxido de nitrogênio"},
+            "so2": {"name": "SO₂", "unit": "µg/m³", "description": "Dióxido de enxofre"},
+            "co": {"name": "CO", "unit": "mg/m³", "description": "Monóxido de carbono"}
+        }
+    }
 
 if __name__ == "__main__":
     import uvicorn

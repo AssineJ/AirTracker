@@ -165,12 +165,13 @@ const MapCard = ({ location }) => {
         }
     };
 
-    return (
-        <div className="relative rounded-2xl overflow-hidden shadow-lg border border-gray-700 h-80">
-            {/* 1. O Div do Mapa */}
+return (
+    <div className="relative rounded-2xl overflow-hidden shadow-lg border border-gray-700">
+        {/* Mapa */}
+        <div className="w-full h-80 relative">
             <div ref={mapRef} className="w-full h-full"></div>
 
-            {/* 2. Sobreposição com Dados do AQI */}
+            {/* Sobreposição AQI */}
             <div className={`absolute inset-0 flex flex-col justify-center items-center bg-gray-900 bg-opacity-75 transition-opacity duration-300 z-10 ${isMapInteractive ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
                 <div className={`text-7xl font-extrabold ${aqiInfo.color}`}>
                     {location.aqi}
@@ -190,14 +191,28 @@ const MapCard = ({ location }) => {
                 </button>
             </div>
 
-            {/* 3. Botão de Fechar */}
+            {/* Botão de Fechar */}
             {isMapInteractive && (
                 <button onClick={handleCloseMap} className="absolute top-3 right-3 bg-white text-gray-800 rounded-full p-2 z-20 shadow-lg">
                     <X className="w-5 h-5" />
                 </button>
             )}
         </div>
-    );
+
+        {/* Métricas simplificadas (estilo "Locais Salvos") */}
+        <div className="flex justify-between items-center bg-gray-800 px-4 py-3 border-t border-gray-700">
+            <div className="flex items-center">
+                <div className={`p-2 rounded-lg ${aqiInfo.bgColor} ${aqiInfo.color} mr-3`}>
+                    <span className="font-bold text-lg">{location.aqi}</span>
+                </div>
+                <div>
+                    <div className="font-semibold text-white">{location.name.split(',')[0]}</div>
+                    <div className="text-sm text-gray-400">{aqiInfo.category}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+);
 };
 
 // --- Tela 1: Inicial (Home) ---
@@ -251,21 +266,30 @@ const LocationsScreen = ({ locations, onSelectLocation, onRemoveLocation }) => {
 // --- Tela 3: Pesquisa (Search) ---
 const SearchScreen = ({ savedLocations, onAddLocation }) => {
     const [searchTerm, setSearchTerm] = useState('');
-    
-    // Filtra os resultados da pesquisa (e não mostra os já salvos)
-    const filteredResults = mockSearchResults.filter(loc => 
-        loc.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
-        !savedLocations.some(saved => saved.id === loc.id)
-    );
+    const [results, setResults] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
 
-    const alreadySaved = mockSearchResults.filter(loc => 
-        loc.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
-        savedLocations.some(saved => saved.id === loc.id)
-    );
+    // Busca real na API FastAPI
+    const handleSearch = async () => {
+        if (searchTerm.trim() === '') return;
+        setLoading(true);
+        setError('');
+        try {
+            const res = await fetch(`http://localhost:8000/places/search?q=${encodeURIComponent(searchTerm)}`);
+            if (!res.ok) throw new Error('Erro ao buscar local');
+            const data = await res.json();
+            setResults(data);
+        } catch (err) {
+            setError('Nenhum local encontrado.');
+            setResults([]);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     return (
         <div className="p-4">
-            {/* Título modificado para incluir o ícone de histórico */}
             <div className="flex justify-between items-center mb-4">
                 <h1 className="text-xl font-bold">Buscar Localidade</h1>
                 <button className="text-gray-400 hover:text-white" title="Histórico de Busca">
@@ -273,52 +297,58 @@ const SearchScreen = ({ savedLocations, onAddLocation }) => {
                 </button>
             </div>
             
-            <div className="relative">
+            <div className="relative mb-4">
                 <input 
                     type="text"
                     placeholder="Digite o nome da cidade..."
                     className="w-full bg-gray-700 rounded-full py-3 px-5 pr-12 text-white placeholder-gray-400"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                 />
-                <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <button 
+                    onClick={handleSearch} 
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-blue-400"
+                >
+                    <Search className="w-5 h-5" />
+                </button>
             </div>
-            
-            <div className="mt-6">
-                <h2 className="text-lg font-semibold mb-3">Resultados da Busca</h2>
-                {searchTerm === '' ? (
-                    <p className="text-gray-400 text-sm">Digite algo para buscar.</p>
-                ) : (
-                    <div className="space-y-3">
-                        {filteredResults.map(loc => (
-                            <div key={loc.id} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between">
-                                <div>
-                                    <div className="font-semibold">{loc.name}</div>
-                                    <div className="text-sm text-gray-400">AQI: {loc.aqi} ({loc.category})</div>
+
+            {/* Resultados */}
+            {loading && <p className="text-gray-400 text-sm">Carregando...</p>}
+            {error && <p className="text-gray-400 text-sm">{error}</p>}
+
+            {!loading && !error && results.length > 0 && (
+                <div className="space-y-3">
+                    {results.map((loc, idx) => (
+                        <div key={idx} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between">
+                            <div>
+                                <div className="font-semibold">{loc.name}</div>
+                                <div className="text-sm text-gray-400">
+                                    Lat: {loc.lat.toFixed(2)}, Lng: {loc.lng.toFixed(2)}
                                 </div>
-                                <button onClick={() => onAddLocation(loc)} className="text-blue-400 hover:text-blue-300">
-                                    <Plus className="w-6 h-6" />
-                                </button>
                             </div>
-                        ))}
-                        {alreadySaved.map(loc => (
-                             <div key={loc.id} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between opacity-50">
-                                <div>
-                                    <div className="font-semibold">{loc.name}</div>
-                                    <div className="text-sm text-gray-400">AQI: {loc.aqi} ({loc.category})</div>
-                                </div>
-                                <Check className="w-6 h-6 text-green-400" />
-                            </div>
-                        ))}
-                        {filteredResults.length === 0 && alreadySaved.length === 0 && (
-                            <p className="text-gray-400 text-sm">Nenhum resultado encontrado.</p>
-                        )}
-                    </div>
-                )}
-            </div>
+                            <button 
+                                onClick={() => onAddLocation({
+                                    id: idx + 1000,
+                                    name: loc.name,
+                                    lat: loc.lat,
+                                    lng: loc.lng,
+                                    aqi: 0,
+                                    category: 'Desconhecido'
+                                })} 
+                                className="text-blue-400 hover:text-blue-300"
+                            >
+                                <Plus className="w-6 h-6" />
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
     );
 };
+
 
 // --- Tela 4: Configurações (Settings) ---
 const SettingsScreen = () => {

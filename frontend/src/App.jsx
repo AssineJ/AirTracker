@@ -1,247 +1,457 @@
-import React, { useState } from 'react';
-import { MapPin, Search, Loader, AlertCircle, Wind } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+    Home, 
+    Search, 
+    MapPin, 
+    Settings, 
+    Wind, 
+    Menu, 
+    User, 
+    Leaf, 
+    X, 
+    ChevronRight, 
+    Plus, 
+    Check, 
+    Trash2,
+    History // Adicionado o ícone de Histórico
+} from 'lucide-react';
 
-const API_BASE_URL = 'http://localhost:8000';
+// --- Dados de Exemplo (Mock Data) ---
+const mockLocations = [
+    { id: 1, name: 'São Paulo, Brasil', lat: -23.55, lng: -46.63, aqi: 55, category: 'Moderado' },
+    { id: 2, name: 'Tóquio, Japão', lat: 35.68, lng: 139.76, aqi: 12, category: 'Bom' },
+    { id: 3, name: 'Nova Deli, Índia', lat: 28.61, lng: 77.20, aqi: 180, category: 'Ruim' },
+    { id: 4, name: 'Pequim, China', lat: 39.90, lng: 116.40, aqi: 95, category: 'Moderado' },
+    { id: 5, name: 'Los Angeles, EUA', lat: 34.05, lng: -118.24, aqi: 72, category: 'Moderado' },
+    { id: 6, name: 'Curitiba, Brasil', lat: -25.42, lng: -49.27, aqi: 25, category: 'Bom' },
+];
 
-const AQI_CATEGORIES = {
-  'Bom': { color: 'bg-green-500', range: '0-50' },
-  'Moderado': { color: 'bg-yellow-500', range: '51-100' },
-  'Insalubre para Grupos Sensíveis': { color: 'bg-orange-500', range: '101-150' },
-  'Insalubre': { color: 'bg-red-500', range: '151-200' },
-  'Muito Insalubre': { color: 'bg-purple-500', range: '201-300' },
-  'Perigoso': { color: 'bg-red-900', range: '301+' }
+const mockSearchResults = [
+    { id: 10, name: 'Rio de Janeiro, Brasil', lat: -22.90, lng: -43.17, aqi: 40, category: 'Bom' },
+    { id: 11, name: 'Belo Horizonte, Brasil', lat: -19.92, lng: -43.93, aqi: 33, category: 'Bom' },
+    { id: 12, name: 'Paris, França', lat: 48.85, lng: 2.35, aqi: 60, category: 'Moderado' },
+];
+
+// --- Funções Auxiliares de Estilo ---
+const getAqiInfo = (aqi) => {
+    if (aqi <= 50) return { category: 'Bom', color: 'text-green-400', bgColor: 'bg-green-500/20', borderColor: 'border-green-400' };
+    if (aqi <= 100) return { category: 'Moderado', color: 'text-yellow-400', bgColor: 'bg-yellow-500/20', borderColor: 'border-yellow-400' };
+    if (aqi <= 150) return { category: 'Ruim (Sensíveis)', color: 'text-orange-400', bgColor: 'bg-orange-500/20', borderColor: 'border-orange-400' };
+    if (aqi <= 200) return { category: 'Ruim', color: 'text-red-500', bgColor: 'bg-red-500/20', borderColor: 'border-red-500' };
+    if (aqi <= 300) return { category: 'Muito Ruim', color: 'text-purple-500', bgColor: 'bg-purple-500/20', borderColor: 'border-purple-400' };
+    return { category: 'Perigoso', color: 'text-maroon-400', bgColor: 'bg-maroon-500/20', borderColor: 'border-maroon-400' };
 };
 
-function App() {
-  const [searchMode, setSearchMode] = useState('name');
-  const [searchInput, setSearchInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [aqiData, setAqiData] = useState(null);
-  const [currentLocation, setCurrentLocation] = useState(null);
 
-  const handleUseLocation = () => {
-    setLoading(true);
-    setError('');
+// --- Componente: Card do Mapa Interativo ---
+// Este é o componente complexo que criamos antes
+const MapCard = ({ location }) => {
+    const mapRef = useRef(null);
+    const mapInstance = useRef(null);
+    const [isMapInteractive, setIsMapInteractive] = useState(false);
     
-    if (!navigator.geolocation) {
-      setError('Geolocalização não é suportada pelo seu navegador.');
-      setLoading(false);
-      return;
-    }
+    // INÍCIO DA ALTERAÇÃO: Corrigir a condição de corrida do Leaflet
+    // Começa como 'false' para forçar a verificação e carregamento no useEffect
+    const [isLeafletReady, setIsLeafletReady] = useState(false);
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        setCurrentLocation({ lat, lng });
-        await fetchAQI(lat, lng);
-      },
-      (err) => {
-        setLoading(false);
-        if (err.code === err.PERMISSION_DENIED) {
-          setError('Permissão de localização negada. Use a busca manual.');
-        } else {
-          setError('Erro ao obter localização. Tente novamente.');
-        }
-      }
-    );
-  };
+    const aqiInfo = getAqiInfo(location.aqi);
+    const mapCoords = [location.lat, location.lng];
+    const defaultZoom = 13;
 
-  const fetchAQI = async (lat, lng) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/aqi/current?lat=${lat}&lng=${lng}`);
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Erro ao buscar dados de qualidade do ar');
-      }
-      const data = await response.json();
-      setAqiData(data);
-      setError('');
-    } catch (err) {
-      setError(err.message);
-      setAqiData(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSearch = async () => {
-    if (!searchInput.trim()) {
-      setError('Digite um local ou coordenadas');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    setAqiData(null);
-
-    try {
-      if (searchMode === 'coords') {
-        const normalized = searchInput.replace(',', '.').trim();
-        const parts = normalized.split(/[\s,]+/);
-        
-        if (parts.length !== 2) {
-          throw new Error('Formato inválido. Use: lat,lng ou lat lng');
+    useEffect(() => {
+        // Verifica se o Leaflet já está totalmente carregado
+        if (window.L && window.L.map) {
+            // console.log("Leaflet já está carregado.");
+            // Garante que a correção do ícone seja aplicada
+            if (!L.Icon.Default.prototype._getIconUrl) {
+                delete L.Icon.Default.prototype._getIconUrl;
+                L.Icon.Default.mergeOptions({
+                    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+                    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+                    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+                });
+            }
+            setIsLeafletReady(true);
+            return;
         }
 
-        const lat = parseFloat(parts[0]);
-        const lng = parseFloat(parts[1]);
-
-        if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-          throw new Error('Coordenadas inválidas. Lat: -90 a 90, Lng: -180 a 180');
+        // Impede a injeção duplicada do script se o componente re-renderizar
+        // enquanto o script ainda está a ser baixado.
+        if (document.querySelector('script[src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"]')) {
+            // console.log("Carregamento do Leaflet em progresso...");
+            return;
         }
 
-        setCurrentLocation({ lat, lng });
-        await fetchAQI(lat, lng);
-      } else {
-        const response = await fetch(`${API_BASE_URL}/places/search?q=${encodeURIComponent(searchInput)}`);
-        if (!response.ok) {
-          throw new Error('Erro ao buscar local');
+        // console.log("A carregar o Leaflet...");
+        // Carrega o Leaflet se ainda não foi carregado
+        // Carrega CSS
+        const leafletCSS = document.createElement('link');
+            leafletCSS.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+            leafletCSS.rel = "stylesheet";
+            document.head.appendChild(leafletCSS);
+
+            // Carrega JS
+            const leafletJS = document.createElement('script');
+            leafletJS.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+        leafletJS.async = true;
+        leafletJS.onload = () => {
+            // console.log("Leaflet carregado com sucesso.");
+            // Corrige o bug do ícone do marcador
+            delete L.Icon.Default.prototype._getIconUrl;
+                L.Icon.Default.mergeOptions({
+                    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+                    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+                    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+                });
+                setIsLeafletReady(true);
+            };
+            document.head.appendChild(leafletJS);
+        // A CHAVE '}' EXTRA FOI REMOVIDA DAQUI. Este é o fecho do useEffect.
+    }, []);
+
+    useEffect(() => {
+        // Inicializa o mapa quando o Leaflet estiver pronto e o ref do div existir
+        if (isLeafletReady && mapRef.current && !mapInstance.current) {
+            mapInstance.current = L.map(mapRef.current, {
+                center: mapCoords,
+                zoom: defaultZoom,
+                zoomControl: false,
+                dragging: false,
+                scrollWheelZoom: false,
+                touchZoom: false,
+            });
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap'
+            }).addTo(mapInstance.current);
+
+            L.marker(mapCoords).addTo(mapInstance.current);
         }
-        const places = await response.json();
-        
-        if (places.length === 0) {
-          throw new Error('Nenhum local encontrado. Tente outro nome.');
+
+        // Atualiza o mapa quando a localização mudar
+        if (mapInstance.current) {
+            mapInstance.current.setView(mapCoords, defaultZoom);
+            // Limpa marcadores antigos e adiciona um novo
+            mapInstance.current.eachLayer((layer) => {
+                if (layer instanceof L.Marker) {
+                    layer.remove();
+                }
+            });
+            L.marker(mapCoords).addTo(mapInstance.current);
         }
+    }, [isLeafletReady, location]); // Depende do location para atualizar
 
-        const place = places[0];
-        setCurrentLocation({ lat: place.lat, lng: place.lng });
-        await fetchAQI(place.lat, place.lng);
-      }
-    } catch (err) {
-      setError(err.message);
-      setLoading(false);
-    }
-  };
+    const handleExpandMap = (e) => {
+        e.stopPropagation();
+        setIsMapInteractive(true);
+        if (mapInstance.current) {
+            mapInstance.current.zoomControl.addTo(mapInstance.current);
+            mapInstance.current.dragging.enable();
+            mapInstance.current.scrollWheelZoom.enable();
+            mapInstance.current.touchZoom.enable();
+        }
+    };
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter') {
-      handleSearch();
-    }
-  };
+    const handleCloseMap = (e) => {
+        e.stopPropagation();
+        setIsMapInteractive(false);
+        if (mapInstance.current) {
+            mapInstance.current.zoomControl.remove();
+            mapInstance.current.dragging.disable();
+            mapInstance.current.scrollWheelZoom.disable();
+            mapInstance.current.touchZoom.disable();
+            mapInstance.current.setView(mapCoords, defaultZoom);
+        }
+    };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <div className="max-w-2xl mx-auto">
-        <header className="text-center py-8">
-          <div className="flex items-center justify-center gap-3 mb-2">
-            <Wind className="w-10 h-10 text-indigo-600" />
-            <h1 className="text-4xl font-bold text-gray-800">AirCheck</h1>
-          </div>
-          <p className="text-gray-600">Monitor de Qualidade do Ar</p>
-        </header>
+    return (
+        <div className="relative rounded-2xl overflow-hidden shadow-lg border border-gray-700 h-80">
+            {/* 1. O Div do Mapa */}
+            <div ref={mapRef} className="w-full h-full"></div>
 
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <div className="flex gap-2 mb-4">
-            <button
-              onClick={() => setSearchMode('name')}
-              className={`flex-1 py-2 px-4 rounded-lg font-medium transition ${
-                searchMode === 'name'
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Nome do Local
-            </button>
-            <button
-              onClick={() => setSearchMode('coords')}
-              className={`flex-1 py-2 px-4 rounded-lg font-medium transition ${
-                searchMode === 'coords'
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Coordenadas
-            </button>
-          </div>
-
-          <div className="flex gap-2 mb-4">
-            <input
-              type="text"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder={searchMode === 'name' ? 'Ex: São Paulo, SP' : 'Ex: -23.55,-46.63'}
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            <button
-              onClick={handleSearch}
-              disabled={loading}
-              className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-400 transition flex items-center gap-2"
-            >
-              <Search className="w-5 h-5" />
-              Buscar
-            </button>
-          </div>
-
-          <button
-            onClick={handleUseLocation}
-            disabled={loading}
-            className="w-full py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition flex items-center justify-center gap-2"
-          >
-            <MapPin className="w-5 h-5" />
-            Usar Minha Localização
-          </button>
-
-          {currentLocation && (
-            <div className="mt-4 p-3 bg-gray-50 rounded-lg text-sm text-gray-600">
-              📍 Lat: {currentLocation.lat.toFixed(4)}, Lng: {currentLocation.lng.toFixed(4)}
+            {/* 2. Sobreposição com Dados do AQI */}
+            <div className={`absolute inset-0 flex flex-col justify-center items-center bg-gray-900 bg-opacity-75 transition-opacity duration-300 z-10 ${isMapInteractive ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+                <div className={`text-7xl font-extrabold ${aqiInfo.color}`}>
+                    {location.aqi}
+                </div>
+                <div className="text-lg font-semibold mt-2">AQI - Índice de Qualidade</div>
+                <div className="flex items-center text-gray-300 mt-1">
+                    <MapPin className="w-4 h-4 mr-1" />
+                    <span>{location.name}</span>
+                </div>
+                
+                <div className={`mt-4 ${aqiInfo.bgColor} ${aqiInfo.color} ${aqiInfo.borderColor} border font-bold py-2 px-5 rounded-full text-sm`}>
+                    {aqiInfo.category.toUpperCase()}
+                </div>
+                
+                <button onClick={handleExpandMap} className="mt-6 text-xs text-blue-300 hover:text-blue-200 font-medium">
+                    Ver mapa interativo
+                </button>
             </div>
-          )}
+
+            {/* 3. Botão de Fechar */}
+            {isMapInteractive && (
+                <button onClick={handleCloseMap} className="absolute top-3 right-3 bg-white text-gray-800 rounded-full p-2 z-20 shadow-lg">
+                    <X className="w-5 h-5" />
+                </button>
+            )}
         </div>
+    );
+};
 
-        {loading && (
-          <div className="bg-white rounded-lg shadow-lg p-8 flex items-center justify-center">
-            <Loader className="w-8 h-8 text-indigo-600 animate-spin" />
-            <span className="ml-3 text-gray-700">Carregando dados...</span>
-          </div>
-        )}
-
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-            <p className="text-red-700">{error}</p>
-          </div>
-        )}
-
-        {aqiData && !loading && (
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <div className="text-center mb-6">
-              <div className={`inline-block px-6 py-3 rounded-full ${AQI_CATEGORIES[aqiData.category]?.color || 'bg-gray-500'} text-white mb-3`}>
-                <div className="text-5xl font-bold">{aqiData.aqi}</div>
-                <div className="text-sm mt-1">AQI</div>
-              </div>
-              <h2 className="text-2xl font-bold text-gray-800 mb-2">{aqiData.category}</h2>
-              <p className="text-gray-600">{aqiData.location.label}</p>
-              <p className="text-sm text-gray-500 mt-1">
-                Fonte: {aqiData.source} | {new Date(aqiData.timestamp).toLocaleString('pt-BR')}
-              </p>
+// --- Tela 1: Inicial (Home) ---
+const HomeScreen = ({ location }) => {
+    return (
+        <div className="p-4">
+            <h1 className="text-xl font-bold mb-4">Seu Local Atual</h1>
+            <MapCard location={location} />
+            <div className="mt-4 bg-gray-800 p-4 rounded-xl">
+                 <h2 className="text-lg font-semibold mb-2">Recomendação de Saúde</h2>
+                 <p className="text-sm text-gray-300">
+                    {location.aqi <= 50 
+                        ? "Aproveite o dia ao ar livre!" 
+                        : "Grupos sensíveis: considerem reduzir atividades ao ar livre."}
+                 </p>
             </div>
+        </div>
+    );
+};
 
-            <div className="border-t pt-4">
-              <h3 className="font-semibold text-gray-700 mb-3">Principais Poluentes</h3>
-              <div className="grid grid-cols-2 gap-3">
-                {Object.entries(aqiData.pollutants).map(([key, value]) => (
-                  value !== null && (
-                    <div key={key} className="bg-gray-50 rounded-lg p-3">
-                      <div className="text-sm text-gray-600 uppercase">{key}</div>
-                      <div className="text-xl font-bold text-gray-800">
-                        {typeof value === 'number' ? value.toFixed(1) : value}
-                        <span className="text-sm font-normal text-gray-500 ml-1">
-                          {key === 'co' ? 'mg/m³' : 'µg/m³'}
-                        </span>
-                      </div>
+// --- Tela 2: Lista de Locais (Locations) ---
+const LocationsScreen = ({ locations, onSelectLocation, onRemoveLocation }) => {
+    return (
+        <div className="p-4">
+            <h1 className="text-xl font-bold mb-4">Locais Salvos</h1>
+            <div className="space-y-3">
+                {locations.map(loc => {
+                    const aqiInfo = getAqiInfo(loc.aqi);
+                    return (
+                        <div key={loc.id} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between">
+                            <div className="flex items-center cursor-pointer" onClick={() => onSelectLocation(loc)}>
+                                <div className={`p-3 rounded-lg ${aqiInfo.bgColor} ${aqiInfo.color} mr-4`}>
+                                    <span className="font-bold text-xl">{loc.aqi}</span>
+                                </div>
+                                <div>
+                                    <div className="font-semibold">{loc.name.split(',')[0]}</div>
+                                    <div className="text-sm text-gray-400">{loc.name.split(',')[1]}</div>
+                                </div>
+                            </div>
+                            <button onClick={() => onRemoveLocation(loc.id)} className="text-gray-500 hover:text-red-500">
+                                <Trash2 className="w-5 h-5" />
+                            </button>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
+// --- Tela 3: Pesquisa (Search) ---
+const SearchScreen = ({ savedLocations, onAddLocation }) => {
+    const [searchTerm, setSearchTerm] = useState('');
+    
+    // Filtra os resultados da pesquisa (e não mostra os já salvos)
+    const filteredResults = mockSearchResults.filter(loc => 
+        loc.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
+        !savedLocations.some(saved => saved.id === loc.id)
+    );
+
+    const alreadySaved = mockSearchResults.filter(loc => 
+        loc.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
+        savedLocations.some(saved => saved.id === loc.id)
+    );
+
+    return (
+        <div className="p-4">
+            {/* Título modificado para incluir o ícone de histórico */}
+            <div className="flex justify-between items-center mb-4">
+                <h1 className="text-xl font-bold">Buscar Localidade</h1>
+                <button className="text-gray-400 hover:text-white" title="Histórico de Busca">
+                    <History className="w-6 h-6" />
+                </button>
+            </div>
+            
+            <div className="relative">
+                <input 
+                    type="text"
+                    placeholder="Digite o nome da cidade..."
+                    className="w-full bg-gray-700 rounded-full py-3 px-5 pr-12 text-white placeholder-gray-400"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                />
+                <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            </div>
+            
+            <div className="mt-6">
+                <h2 className="text-lg font-semibold mb-3">Resultados da Busca</h2>
+                {searchTerm === '' ? (
+                    <p className="text-gray-400 text-sm">Digite algo para buscar.</p>
+                ) : (
+                    <div className="space-y-3">
+                        {filteredResults.map(loc => (
+                            <div key={loc.id} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between">
+                                <div>
+                                    <div className="font-semibold">{loc.name}</div>
+                                    <div className="text-sm text-gray-400">AQI: {loc.aqi} ({loc.category})</div>
+                                </div>
+                                <button onClick={() => onAddLocation(loc)} className="text-blue-400 hover:text-blue-300">
+                                    <Plus className="w-6 h-6" />
+                                </button>
+                            </div>
+                        ))}
+                        {alreadySaved.map(loc => (
+                             <div key={loc.id} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between opacity-50">
+                                <div>
+                                    <div className="font-semibold">{loc.name}</div>
+                                    <div className="text-sm text-gray-400">AQI: {loc.aqi} ({loc.category})</div>
+                                </div>
+                                <Check className="w-6 h-6 text-green-400" />
+                            </div>
+                        ))}
+                        {filteredResults.length === 0 && alreadySaved.length === 0 && (
+                            <p className="text-gray-400 text-sm">Nenhum resultado encontrado.</p>
+                        )}
                     </div>
-                  )
-                ))}
-              </div>
+                )}
             </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+        </div>
+    );
+};
 
-export default App;
+// --- Tela 4: Configurações (Settings) ---
+const SettingsScreen = () => {
+    const SettingItem = ({ icon, name }) => (
+        <div className="bg-gray-800 p-4 rounded-xl flex items-center justify-between cursor-pointer hover:bg-gray-700">
+            <div className="flex items-center">
+                {icon}
+                <span className="ml-4 font-medium">{name}</span>
+            </div>
+            <ChevronRight className="w-5 h-5 text-gray-500" />
+        </div>
+    );
+
+    return (
+        <div className="p-4">
+            <h1 className="text-xl font-bold mb-4">Configurações</h1>
+            <div className="space-y-3">
+                {/* Item "Minha Conta" removido */}
+                <SettingItem icon={<Wind className="w-5 h-5 text-gray-400" />} name="Unidades (AQI, °C)" />
+                <SettingItem icon={<Settings className="w-5 h-5 text-gray-400" />} name="Notificações" />
+                <SettingItem icon={<Leaf className="w-5 h-5 text-gray-400" />} name="Sobre o AirCheck" />
+            </div>
+        </div>
+    );
+};
+
+// --- Componente: Cabeçalho (Header) ---
+const Header = () => (
+    <header className="p-4 flex justify-center items-center bg-gray-900 border-b border-gray-800 sticky top-0 z-20">
+        {/* Ícone de Menu (3 listras) removido */}
+        <span className="font-bold text-lg flex items-center">
+            <Leaf className="w-5 h-5 mr-2 text-blue-400" />
+            AirCheck
+        </span>
+        {/* Ícone de Usuário removido */}
+    </header>
+);
+
+// --- Componente: Navegação Inferior (Bottom Nav) ---
+const BottomNav = ({ activePage, onNavigate }) => {
+    const NavItem = ({ icon: Icon, pageName }) => {
+        const isActive = activePage === pageName;
+        return (
+            <button 
+                onClick={() => onNavigate(pageName)}
+                className={`flex flex-col items-center p-2 rounded-lg ${isActive ? 'text-blue-400' : 'text-gray-500'} hover:text-blue-300 w-1/4`}
+            >
+                <Icon className="w-6 h-6" />
+            </button>
+        );
+    };
+
+    return (
+        <nav className="flex justify-around items-center p-2 bg-gray-800 border-t border-gray-700 sticky bottom-0 z-20">
+            <NavItem icon={Home} pageName="home" />
+            <NavItem icon={MapPin} pageName="locations" />
+            <NavItem icon={Search} pageName="search" />
+            <NavItem icon={Settings} pageName="settings" />
+        </nav>
+    );
+};
+
+// --- Componente Principal: App ---
+export default function App() {
+    const [currentPage, setCurrentPage] = useState('home');
+    const [locations, setLocations] = useState(mockLocations);
+    const [currentLocation, setCurrentLocation] = useState(mockLocations[0]);
+
+    // Função para renderizar a página correta
+    const renderPage = () => {
+        switch (currentPage) {
+            case 'home':
+                return <HomeScreen location={currentLocation} />;
+            case 'locations':
+                return <LocationsScreen 
+                            locations={locations} 
+                            onSelectLocation={handleSelectLocation}
+                            onRemoveLocation={handleRemoveLocation}
+                        />;
+            case 'search':
+                return <SearchScreen 
+                            savedLocations={locations} 
+                            onAddLocation={handleAddLocation} 
+                        />;
+            case 'settings':
+                return <SettingsScreen />;
+            default:
+                return <HomeScreen location={currentLocation} />;
+        }
+    };
+
+    // --- Funções de Manipulação de Dados ---
+    const handleSelectLocation = (location) => {
+        setCurrentLocation(location);
+        setCurrentPage('home'); // Navega para a home para ver os detalhes
+    };
+
+    const handleAddLocation = (location) => {
+        if (!locations.some(loc => loc.id === location.id)) {
+            setLocations([location, ...locations]);
+        }
+        setCurrentPage('locations'); // Navega para a lista de locais
+    };
+
+    const handleRemoveLocation = (id) => {
+        // Impede que o último local seja removido
+        if (locations.length <= 1) {
+            alert("Não é possível remover o último local."); // (Em um app real, usaríamos um modal)
+            return;
+        }
+        // Se o local removido for o local atual, seleciona um novo local atual
+        if (currentLocation.id === id) {
+            setCurrentLocation(locations.find(loc => loc.id !== id));
+        }
+        setLocations(locations.filter(loc => loc.id !== id));
+    };
+
+
+    return (
+        // Simulação da Moldura do Celular
+        <div className="flex justify-center items-center min-h-screen bg-gray-700 p-4">
+            <div className="w-full max-w-sm bg-gray-900 text-white rounded-3xl shadow-2xl overflow-hidden border-4 border-gray-700">
+                {/* 1. Cabeçalho */}
+                <Header />
+
+                {/* 2. Conteúdo da Página (rolável) */}
+                <div className="h-[70vh] overflow-y-auto">
+                    {renderPage()}
+                </div>
+
+                {/* 3. Navegação Inferior */}
+                <BottomNav activePage={currentPage} onNavigate={setCurrentPage} />
+            </div>
+        </div>
+    );
+}

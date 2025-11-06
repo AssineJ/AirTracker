@@ -308,6 +308,13 @@ const LocationsScreen = ({ locations, onSelectLocation, onRemoveLocation }) => {
 };
 
 // --- Tela 3: Pesquisa (Search) ---
+const generateLocationId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return `loc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+};
+
 const SearchScreen = ({ savedLocations, onAddLocation }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [results, setResults] = useState([]);
@@ -403,21 +410,12 @@ const SearchScreen = ({ savedLocations, onAddLocation }) => {
 
             {!loading && results.length > 0 && (
                 <div className="space-y-3">
-                    {results.map((loc) => {
-                        const primaryName = loc.name || getLocationParts(loc.label ?? '').primary;
-                        const { secondary } = getLocationParts(loc.label ?? loc.name ?? '');
-                        const alreadySaved = isSaved(loc);
-
-                        return (
-                            <div key={loc._internalId} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between">
-                                <div>
-                                    <div className="font-semibold">{primaryName || 'Local sem nome'}</div>
-                                    <div className="text-sm text-gray-400">
-                                        {secondary || 'Coordenadas aproximadas'}
-                                    </div>
-                                    <div className="text-xs text-gray-500 mt-1">
-                                        Lat: {Number.isFinite(loc.lat) ? loc.lat.toFixed(2) : '--'}, Lng: {Number.isFinite(loc.lng) ? loc.lng.toFixed(2) : '--'}
-                                    </div>
+                    {results.map((loc, idx) => (
+                        <div key={`${loc.lat}-${loc.lng}-${idx}`} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between">
+                            <div>
+                                <div className="font-semibold">{loc.name}</div>
+                                <div className="text-sm text-gray-400">
+                                    Lat: {loc.lat.toFixed(2)}, Lng: {loc.lng.toFixed(2)}
                                 </div>
                                 <button
                                     onClick={() => !alreadySaved && onAddLocation(loc)}
@@ -428,8 +426,21 @@ const SearchScreen = ({ savedLocations, onAddLocation }) => {
                                     <Plus className="w-5 h-5" />
                                 </button>
                             </div>
-                        );
-                    })}
+                            <button
+                                onClick={() => onAddLocation({
+                                    id: generateLocationId(),
+                                    name: loc.name,
+                                    lat: loc.lat,
+                                    lng: loc.lng,
+                                    aqi: loc.aqi ?? 0,
+                                    category: loc.category ?? 'Desconhecido'
+                                })}
+                                className="text-blue-400 hover:text-blue-300"
+                            >
+                                <Plus className="w-6 h-6" />
+                            </button>
+                        </div>
+                    ))}
                 </div>
             )}
         </div>
@@ -678,37 +689,30 @@ export default function App() {
         setLocations(prev => prev.map(loc => (loc.id === updatedLocation.id ? updatedLocation : loc)));
     };
 
-    const handleAddLocation = async (location) => {
-        if (!location) {
-            return;
-        }
+    const handleAddLocation = (location) => {
+        const normalizeName = (value) => (value || '').toLowerCase().trim();
 
-        const locationId = createLocationId(location.lat, location.lng);
-        const { primary: initialName } = getLocationParts(location.name);
-        const baseLocation = {
-            id: locationId,
-            name: initialName,
-            label: location.label ?? location.name ?? initialName,
-            station: location.station,
-            lat: location.lat,
-            lng: location.lng,
-            aqi: 0,
-        };
-
-        setIsLoadingCurrent(true);
-        const updatedLocation = await fetchAqiForLocation(baseLocation);
-        setIsLoadingCurrent(false);
-
-        if (!updatedLocation) {
-            return;
-        }
-
-        setLocations(prev => {
-            const filtered = prev.filter(loc => loc.id !== updatedLocation.id);
-            return [updatedLocation, ...filtered];
+        const existing = locations.find((loc) => {
+            const sameName = normalizeName(loc.name) === normalizeName(location.name);
+            const sameCoords = Math.abs(loc.lat - location.lat) < 1e-4 && Math.abs(loc.lng - location.lng) < 1e-4;
+            return sameName || sameCoords;
         });
 
-        setCurrentLocation(updatedLocation);
+        if (existing) {
+            setCurrentLocation(existing);
+            setCurrentPage('home');
+            return;
+        }
+
+        const newLocation = {
+            id: location.id || generateLocationId(),
+            aqi: typeof location.aqi === 'number' ? location.aqi : 0,
+            category: location.category || 'Desconhecido',
+            ...location,
+        };
+
+        setLocations([newLocation, ...locations]);
+        setCurrentLocation(newLocation);
         setCurrentPage('locations');
     };
 

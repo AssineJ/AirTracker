@@ -560,6 +560,12 @@ if not WAQI_TOKEN:
 waqi = WAQIClient(WAQI_TOKEN) if WAQI_TOKEN else None
 nominatim = NominatimClient()
 
+
+def normalize_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFD", value or "").encode("ascii", "ignore").decode("ascii")
+    return normalized.lower().strip()
+
+
 FALLBACK_PLACES = [
     {"name": "São Paulo, Brasil", "lat": -23.55, "lng": -46.63},
     {"name": "Rio de Janeiro, Brasil", "lat": -22.91, "lng": -43.17},
@@ -571,11 +577,107 @@ FALLBACK_PLACES = [
 ]
 
 
-def normalize_text(value: str) -> str:
-    normalized = unicodedata.normalize("NFD", value or "").encode("ascii", "ignore").decode("ascii")
-    return normalized.lower().strip()
+def extract_place_parts(place_name: str) -> Dict[str, str]:
+    """Retorna nome normalizado completo, cidade e país de um fallback."""
+
+    normalized_full = normalize_text(place_name)
+    pieces = [p.strip() for p in normalized_full.split(",") if p.strip()]
+    city = pieces[0] if pieces else normalized_full
+    country = pieces[-1] if len(pieces) > 1 else ""
+
+    return {
+        "full": normalized_full,
+        "city": city,
+        "country": country,
+    }
 
 
+def build_country_capital_map() -> Dict[str, Dict]:
+    """Mapeia países conhecidos para suas capitais no fallback."""
+
+    manual_map = {
+        "brasil": "Brasília, Brasil",
+        "portugal": "Lisboa, Portugal",
+        "japao": "Tóquio, Japão",
+        "china": "Hong Kong, China",
+        "emirados arabes unidos": "Dubai, Emirados Árabes Unidos",
+    }
+
+    capitals: Dict[str, Dict] = {}
+
+    for country_key, place_name in manual_map.items():
+        normalized_target = normalize_text(place_name)
+        for place in FALLBACK_PLACES:
+            place_parts = extract_place_parts(place["name"])
+            if place_parts["full"] == normalized_target:
+                capitals[country_key] = place
+                break
+
+    return capitals
+
+
+COUNTRY_CAPITALS = build_country_capital_map()
+
+
+def resolve_fallback_results(query: str) -> List[Dict]:
+    """Resolve resultados determinísticos quando Nominatim não responde."""
+
+    normalized_query = " ".join(normalize_text(query).split())
+
+    if not normalized_query:
+        return []
+
+    query_parts = [p.strip() for p in normalized_query.split(",") if p.strip()]
+    city_part = query_parts[0] if query_parts else normalized_query
+    country_part = query_parts[-1] if len(query_parts) > 1 else ""
+
+    exact_matches: List[Dict] = []
+    city_matches: List[Dict] = []
+
+    for place in FALLBACK_PLACES:
+        parts = extract_place_parts(place["name"])
+
+        aliases = {
+            parts["full"],
+            parts["city"],
+        }
+
+        if parts["country"]:
+            aliases.add(f"{parts['city']}, {parts['country']}")
+            aliases.add(f"{parts['city']} {parts['country']}")
+
+        if normalized_query in aliases:
+            exact_matches.append(place)
+            continue
+
+        if city_part == parts["city"]:
+            if country_part:
+                if country_part == parts["country"]:
+                    exact_matches.append(place)
+                else:
+                    city_matches.append(place)
+            else:
+                city_matches.append(place)
+
+    if exact_matches:
+        return exact_matches
+
+    if city_matches and not country_part:
+        return city_matches
+
+    if country_part and country_part in COUNTRY_CAPITALS:
+        return [COUNTRY_CAPITALS[country_part]]
+
+    if not country_part and normalized_query in COUNTRY_CAPITALS:
+        return [COUNTRY_CAPITALS[normalized_query]]
+
+    partial_matches = [
+        place
+        for place in FALLBACK_PLACES
+        if normalized_query in extract_place_parts(place["name"])["full"]
+    ]
+
+    return partial_matches
 aqi_service = AqiService()
 
 # ==================== ROTAS ====================
@@ -626,12 +728,7 @@ async def search_places(q: str = Query(..., min_length=1, description="Nome da c
     results = await nominatim.search(q)
 
     if not results:
-        normalized_query = normalize_text(q)
-        fallback_results = [
-            place
-            for place in FALLBACK_PLACES
-            if normalized_query in normalize_text(place["name"])
-        ]
+        fallback_results = resolve_fallback_results(q)
 
         if fallback_results:
             set_cache(cache_key, fallback_results)

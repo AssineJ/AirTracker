@@ -144,7 +144,7 @@ def test_multiple_sources():
     # Pelo menos uma fonte deve funcionar
     assert len(sources_found) > 0
     
-    # Fontes válidas
-    valid_sources = ["open-meteo", "waqi", "openweather", "api-ninjas", "openaq", "mock"]
+    # Fontes válidas (apenas WAQI ou mock quando token não está configurado)
+    valid_sources = ["waqi", "mock"]
     for source in sources_found:
         assert source in valid_sources

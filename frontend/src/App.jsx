@@ -323,68 +323,75 @@ const SearchScreen = ({ savedLocations, onAddLocation }) => {
     const [hasSearched, setHasSearched] = useState(false);
 
     const handleSearch = async () => {
-        const term = searchTerm.trim();
-        if (!term) {
-            setError('Digite o nome de uma cidade ou país.');
+    const term = searchTerm.trim();
+    if (!term) {
+        setError('Digite o nome de uma cidade ou país.');
+        setResults([]);
+        setHasSearched(true);
+        return;
+    }
+
+    setHasSearched(true);
+    setLoading(true);
+    setError('');
+    setResults([]);
+
+    try {
+        const res = await fetch(`http://localhost:8000/places/search?q=${encodeURIComponent(searchTerm)}`);
+        if (!res.ok) throw new Error('Erro ao buscar local');
+        const data = await res.json();
+        console.log("Resultados da API para", searchTerm + ":", data);
+        
+        const sanitizedResults = Array.isArray(data)
+            ? data
+                .map((item) => {
+                    const lat = typeof item.lat === 'number' ? item.lat : Number(item.lat);
+                    const lng = typeof item.lng === 'number' ? item.lng : Number(item.lng);
+
+                    if (Number.isNaN(lat) || Number.isNaN(lng)) {
+                        return null;
+                    }
+
+                    return {
+                        id: item.id || generateLocationId(),
+                        name: item.name || 'Local desconhecido',
+                        label: item.label || item.name || 'Local desconhecido',
+                        lat,
+                        lng,
+                        aqi: typeof item.aqi === 'number' ? item.aqi : 0,
+                        category: item.category || 'Desconhecido',
+                    };
+                })
+                .filter(Boolean)
+            : [];
+
+        console.log("Resultados sanitizados:", sanitizedResults);
+
+        if (!sanitizedResults.length) {
+            setError('Nenhum local encontrado.');
             setResults([]);
-            setHasSearched(true);
             return;
         }
 
-        setHasSearched(true);
-        setLoading(true);
-        setError('');
+        setResults(sanitizedResults);
+    } catch (err) {
+        console.error('Erro ao buscar localidade:', err);
+        setError('Nenhum local encontrado.');
         setResults([]);
+    } finally {
+        setLoading(false);
+    }
+};
 
-        try {
-            const res = await fetch(`http://localhost:8000/places/search?q=${encodeURIComponent(searchTerm)}`);
-            if (!res.ok) throw new Error('Erro ao buscar local');
-            const data = await res.json();
-            const sanitizedResults = Array.isArray(data)
-                ? data
-                    .map((item) => {
-                        const lat = typeof item.lat === 'number' ? item.lat : Number(item.lat);
-                        const lng = typeof item.lng === 'number' ? item.lng : Number(item.lng);
-
-                        if (Number.isNaN(lat) || Number.isNaN(lng)) {
-                            return null;
-                        }
-
-                        return {
-                            id: item.id || generateLocationId(),
-                            name: item.name || 'Local desconhecido',
-                            lat,
-                            lng,
-                            aqi: typeof item.aqi === 'number' ? item.aqi : 0,
-                            category: item.category || 'Desconhecido',
-                        };
-                    })
-                    .filter(Boolean)
-                : [];
-
-            if (!sanitizedResults.length) {
-                setError('Nenhum local encontrado.');
-                setResults([]);
-                return;
-            }
-
-            setResults(sanitizedResults);
-        } catch (err) {
-            console.error('Erro ao buscar localidade:', err);
-            setError('Nenhum local encontrado.');
-            setResults([]);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const isSaved = (candidate) => {
-        return savedLocations.some((loc) => {
-            const sameLat = Math.abs(loc.lat - candidate.lat) < 0.0001;
-            const sameLng = Math.abs(loc.lng - candidate.lng) < 0.0001;
-            return sameLat && sameLng;
-        });
-    };
+const isSaved = (candidate) => {
+    return savedLocations.some((loc) => {
+        const latDiff = Math.abs(loc.lat - candidate.lat);
+        const lngDiff = Math.abs(loc.lng - candidate.lng);
+        
+        // Mesma tolerância de 0.5 graus
+        return latDiff < 0.5 && lngDiff < 0.5;
+    });
+};
 
     return (
         <div className="p-4">
@@ -421,37 +428,40 @@ const SearchScreen = ({ savedLocations, onAddLocation }) => {
 
             {!loading && results.length > 0 && (
                 <div className="space-y-3">
-                    {results.map((loc, idx) => (
-                        <div key={`${loc.lat}-${loc.lng}-${idx}`} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between">
-                            <div>
-                                <div className="font-semibold">{loc.name}</div>
-                                <div className="text-sm text-gray-400">
-                                    Lat: {loc.lat.toFixed(2)}, Lng: {loc.lng.toFixed(2)}
+                    {results.map((loc, idx) => {
+                                const alreadySaved = isSaved(loc);
+                                return (
+                                <div key={`${loc.lat}-${loc.lng}-${idx}`} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between">
+                                    <div>
+                                        <div className="font-semibold">{loc.name}</div>
+                                        <div className="text-sm text-gray-400">
+                                            Lat: {loc.lat.toFixed(2)}, Lng: {loc.lng.toFixed(2)}
+                                        </div>
+                                        <button
+                                            onClick={() => !alreadySaved && onAddLocation(loc)}
+                                            className={`flex items-center justify-center w-10 h-10 rounded-full border transition ${alreadySaved ? 'border-gray-600 text-gray-500 cursor-not-allowed' : 'border-blue-400 text-blue-400 hover:text-blue-300 hover:border-blue-300'}`}
+                                            disabled={alreadySaved}
+                                            title={alreadySaved ? 'Local já salvo' : 'Salvar local'}
+                                        >
+                                            <Plus className="w-5 h-5" />
+                                        </button>
+                                    </div>
+                                    <button
+                                        onClick={() => onAddLocation({
+                                            id: loc.id || generateLocationId(),
+                                            name: loc.name,
+                                            lat: loc.lat,
+                                            lng: loc.lng,
+                                            aqi: loc.aqi ?? 0,
+                                            category: loc.category ?? 'Desconhecido'
+                                        })}
+                                        className="text-blue-400 hover:text-blue-300"
+                                    >
+                                        <Plus className="w-6 h-6" />
+                                    </button>
                                 </div>
-                                <button
-                                    onClick={() => !alreadySaved && onAddLocation(loc)}
-                                    className={`flex items-center justify-center w-10 h-10 rounded-full border transition ${alreadySaved ? 'border-gray-600 text-gray-500 cursor-not-allowed' : 'border-blue-400 text-blue-400 hover:text-blue-300 hover:border-blue-300'}`}
-                                    disabled={alreadySaved}
-                                    title={alreadySaved ? 'Local já salvo' : 'Salvar local'}
-                                >
-                                    <Plus className="w-5 h-5" />
-                                </button>
-                            </div>
-                            <button
-                                onClick={() => onAddLocation({
-                                    id: loc.id || generateLocationId(),
-                                    name: loc.name,
-                                    lat: loc.lat,
-                                    lng: loc.lng,
-                                    aqi: loc.aqi ?? 0,
-                                    category: loc.category ?? 'Desconhecido'
-                                })}
-                                className="text-blue-400 hover:text-blue-300"
-                            >
-                                <Plus className="w-6 h-6" />
-                            </button>
-                        </div>
-                    ))}
+                                );
+                            })}
                 </div>
             )}
         </div>
@@ -640,23 +650,59 @@ export default function App() {
     }, []);
 
     useEffect(() => {
-        const bootstrapLocations = async () => {
+        const detectUserLocation = async () => {
             setIsLoadingCurrent(true);
-            const updatedLocations = await Promise.all(
-                initialLocations.map(loc => fetchAqiForLocation(loc))
-            );
-            const sanitizedLocations = updatedLocations.filter(Boolean);
 
-            if (sanitizedLocations.length > 0) {
-                setLocations(sanitizedLocations);
-                setCurrentLocation(sanitizedLocations[0]);
+            // Tenta detectar a localização real via GPS
+            if ('geolocation' in navigator) {
+                navigator.geolocation.getCurrentPosition(
+                    async (pos) => {
+                        const { latitude, longitude } = pos.coords;
+                        const gpsLocation = {
+                            id: createLocationId(latitude, longitude),
+                            name: 'Local Atual',
+                            label: 'Detectado via GPS',
+                            lat: latitude,
+                            lng: longitude,
+                            aqi: 0,
+                        };
+
+                        // Busca AQI do local detectado
+                        const updated = await fetchAqiForLocation(gpsLocation);
+                        setCurrentLocation(updated);
+
+                        setLocations((prev) => {
+                            const exists = prev.some(
+                                (loc) =>
+                                    Math.abs(loc.lat - updated.lat) < 0.001 &&
+                                    Math.abs(loc.lng - updated.lng) < 0.001
+                            );
+                            return exists ? prev : [updated, ...prev];
+                        });
+
+                        setIsLoadingCurrent(false);
+                    },
+                    async (err) => {
+                        console.warn('⚠️ GPS negado ou falhou, usando fallback São Paulo.', err);
+                        const fallback = await fetchAqiForLocation(initialLocations[0]);
+                        setCurrentLocation(fallback);
+                        setLocations(initialLocations);
+                        setIsLoadingCurrent(false);
+                    },
+                    { enableHighAccuracy: true, timeout: 10000 }
+                );
+            } else {
+                console.warn('❌ Geolocalização não suportada, usando fallback São Paulo.');
+                const fallback = await fetchAqiForLocation(initialLocations[0]);
+                setCurrentLocation(fallback);
+                setLocations(initialLocations);
+                setIsLoadingCurrent(false);
             }
-
-            setIsLoadingCurrent(false);
         };
 
-        bootstrapLocations();
+        detectUserLocation();
     }, [fetchAqiForLocation]);
+
 
     // Função para renderizar a página correta
     const renderPage = () => {
@@ -700,32 +746,38 @@ export default function App() {
         setLocations(prev => prev.map(loc => (loc.id === updatedLocation.id ? updatedLocation : loc)));
     };
 
-    const handleAddLocation = (location) => {
-        const normalizeName = (value) => (value || '').toLowerCase().trim();
+const handleAddLocation = (location) => {
+    // Verificação simplificada - apenas por coordenadas
+    const existing = locations.find((loc) => {
+        const latDiff = Math.abs(loc.lat - location.lat);
+        const lngDiff = Math.abs(loc.lng - location.lng);
+        
+        // Tolerância aumentada para 0.5 graus (aproximadamente 55km)
+        return latDiff < 0.5 && lngDiff < 0.5;
+    });
 
-        const existing = locations.find((loc) => {
-            const sameName = normalizeName(loc.name) === normalizeName(location.name);
-            const sameCoords = Math.abs(loc.lat - location.lat) < 1e-4 && Math.abs(loc.lng - location.lng) < 1e-4;
-            return sameName || sameCoords;
-        });
+    if (existing) {
+        console.log("Local já existe:", existing.name, "->", location.name);
+        setCurrentLocation(existing);
+        setCurrentPage('home');
+        return;
+    }
 
-        if (existing) {
-            setCurrentLocation(existing);
-            setCurrentPage('home');
-            return;
-        }
-
-        const newLocation = {
-            id: location.id || generateLocationId(),
-            aqi: typeof location.aqi === 'number' ? location.aqi : 0,
-            category: location.category || 'Desconhecido',
-            ...location,
-        };
-
-        setLocations([newLocation, ...locations]);
-        setCurrentLocation(newLocation);
-        setCurrentPage('locations');
+    const newLocation = {
+        id: location.id || generateLocationId(),
+        name: location.name || 'Local desconhecido',
+        label: location.label || location.name || 'Local desconhecido',
+        lat: location.lat,
+        lng: location.lng,
+        aqi: typeof location.aqi === 'number' ? location.aqi : 0,
+        category: location.category || 'Desconhecido',
     };
+
+    console.log("Adicionando novo local:", newLocation.name);
+    setLocations([newLocation, ...locations]);
+    setCurrentLocation(newLocation);
+    setCurrentPage('locations');
+};
 
     const handleRemoveLocation = (id) => {
         // Impede que o último local seja removido

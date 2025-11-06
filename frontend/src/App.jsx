@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
     Home, 
     Search, 
@@ -16,24 +16,41 @@ import {
     History // Adicionado o ícone de Histórico
 } from 'lucide-react';
 
-// --- Dados de Exemplo (Mock Data) ---
-const mockLocations = [
-    { id: 1, name: 'São Paulo, Brasil', lat: -23.55, lng: -46.63, aqi: 55, category: 'Moderado' },
-    { id: 2, name: 'Tóquio, Japão', lat: 35.68, lng: 139.76, aqi: 12, category: 'Bom' },
-    { id: 3, name: 'Nova Deli, Índia', lat: 28.61, lng: 77.20, aqi: 180, category: 'Ruim' },
-    { id: 4, name: 'Pequim, China', lat: 39.90, lng: 116.40, aqi: 95, category: 'Moderado' },
-    { id: 5, name: 'Los Angeles, EUA', lat: 34.05, lng: -118.24, aqi: 72, category: 'Moderado' },
-    { id: 6, name: 'Curitiba, Brasil', lat: -25.42, lng: -49.27, aqi: 25, category: 'Bom' },
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+
+const createLocationId = (lat, lng) => {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return `unknown:${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    return `${lat.toFixed(4)}:${lng.toFixed(4)}`;
+};
+
+// --- Dados iniciais para o aplicativo ---
+const initialLocations = [
+    { id: createLocationId(-23.55, -46.63), name: 'São Paulo', label: 'São Paulo, Brasil', lat: -23.55, lng: -46.63, aqi: 0 },
+    { id: createLocationId(35.68, 139.76), name: 'Tóquio', label: 'Tóquio, Japão', lat: 35.68, lng: 139.76, aqi: 0 },
+    { id: createLocationId(28.61, 77.2), name: 'Nova Deli', label: 'Nova Deli, Índia', lat: 28.61, lng: 77.20, aqi: 0 },
+    { id: createLocationId(39.9, 116.4), name: 'Pequim', label: 'Pequim, China', lat: 39.90, lng: 116.40, aqi: 0 },
+    { id: createLocationId(34.05, -118.24), name: 'Los Angeles', label: 'Los Angeles, EUA', lat: 34.05, lng: -118.24, aqi: 0 },
+    { id: createLocationId(-25.42, -49.27), name: 'Curitiba', label: 'Curitiba, Brasil', lat: -25.42, lng: -49.27, aqi: 0 },
 ];
 
-const mockSearchResults = [
-    { id: 10, name: 'Rio de Janeiro, Brasil', lat: -22.90, lng: -43.17, aqi: 40, category: 'Bom' },
-    { id: 11, name: 'Belo Horizonte, Brasil', lat: -19.92, lng: -43.93, aqi: 33, category: 'Bom' },
-    { id: 12, name: 'Paris, França', lat: 48.85, lng: 2.35, aqi: 60, category: 'Moderado' },
-];
+const getLocationParts = (name = '') => {
+    const parts = name
+        .split(',')
+        .map(part => part.trim())
+        .filter(Boolean);
+
+    return {
+        primary: parts[0] ?? (name || 'Local desconhecido'),
+        secondary: parts.slice(1).join(', '),
+    };
+};
 
 // --- Funções Auxiliares de Estilo ---
-const getAqiInfo = (aqi) => {
+const getAqiInfo = (aqiValue) => {
+    const aqi = Number.isFinite(aqiValue) ? aqiValue : 0;
     if (aqi <= 50) return { category: 'Bom', color: 'text-green-400', bgColor: 'bg-green-500/20', borderColor: 'border-green-400' };
     if (aqi <= 100) return { category: 'Moderado', color: 'text-yellow-400', bgColor: 'bg-yellow-500/20', borderColor: 'border-yellow-400' };
     if (aqi <= 150) return { category: 'Ruim (Sensíveis)', color: 'text-orange-400', bgColor: 'bg-orange-500/20', borderColor: 'border-orange-400' };
@@ -45,7 +62,11 @@ const getAqiInfo = (aqi) => {
 
 // --- Componente: Card do Mapa Interativo ---
 // Este é o componente complexo que criamos antes
-const MapCard = ({ location }) => {
+const MapCard = ({ location, isLoading }) => {
+    if (!location) {
+        return null;
+    }
+
     const mapRef = useRef(null);
     const mapInstance = useRef(null);
     const [isMapInteractive, setIsMapInteractive] = useState(false);
@@ -55,7 +76,10 @@ const MapCard = ({ location }) => {
     const [isLeafletReady, setIsLeafletReady] = useState(false);
 
     const aqiInfo = getAqiInfo(location.aqi);
-    const mapCoords = [location.lat, location.lng];
+    const { primary: primaryName } = getLocationParts(location.name ?? location.label);
+    const mapCoords = [location.lat ?? 0, location.lng ?? 0];
+    const displayAqi = Number.isFinite(location.aqi) ? location.aqi : '--';
+    const locationLabel = location?.label || location?.station || location?.name || 'Local desconhecido';
     const defaultZoom = 13;
 
     useEffect(() => {
@@ -174,18 +198,18 @@ return (
             {/* Sobreposição AQI */}
             <div className={`absolute inset-0 flex flex-col justify-center items-center bg-gray-900 bg-opacity-75 transition-opacity duration-300 z-10 ${isMapInteractive ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
                 <div className={`text-7xl font-extrabold ${aqiInfo.color}`}>
-                    {location.aqi}
+                    {isLoading ? '…' : displayAqi}
                 </div>
                 <div className="text-lg font-semibold mt-2">AQI - Índice de Qualidade</div>
                 <div className="flex items-center text-gray-300 mt-1">
                     <MapPin className="w-4 h-4 mr-1" />
-                    <span>{location.name}</span>
+                    <span>{locationLabel}</span>
                 </div>
-                
+
                 <div className={`mt-4 ${aqiInfo.bgColor} ${aqiInfo.color} ${aqiInfo.borderColor} border font-bold py-2 px-5 rounded-full text-sm`}>
-                    {aqiInfo.category.toUpperCase()}
+                    {isLoading ? 'ATUALIZANDO…' : aqiInfo.category.toUpperCase()}
                 </div>
-                
+
                 <button onClick={handleExpandMap} className="mt-6 text-xs text-blue-300 hover:text-blue-200 font-medium">
                     Ver mapa interativo
                 </button>
@@ -206,7 +230,7 @@ return (
                     <span className="font-bold text-lg">{location.aqi}</span>
                 </div>
                 <div>
-                    <div className="font-semibold text-white">{location.name.split(',')[0]}</div>
+                    <div className="font-semibold text-white">{primaryName}</div>
                     <div className="text-sm text-gray-400">{aqiInfo.category}</div>
                 </div>
             </div>
@@ -216,11 +240,15 @@ return (
 };
 
 // --- Tela 1: Inicial (Home) ---
-const HomeScreen = ({ location }) => {
+const HomeScreen = ({ location, isLoading }) => {
+    if (!location) {
+        return null;
+    }
+
     return (
         <div className="p-4">
             <h1 className="text-xl font-bold mb-4">Seu Local Atual</h1>
-            <MapCard location={location} />
+            <MapCard location={location} isLoading={isLoading} />
             <div className="mt-4 bg-gray-800 p-4 rounded-xl">
                  <h2 className="text-lg font-semibold mb-2">Recomendação de Saúde</h2>
                  <p className="text-sm text-gray-300">
@@ -241,15 +269,32 @@ const LocationsScreen = ({ locations, onSelectLocation, onRemoveLocation }) => {
             <div className="space-y-3">
                 {locations.map(loc => {
                     const aqiInfo = getAqiInfo(loc.aqi);
+                    const cityName = loc.name || getLocationParts(loc.label ?? '').primary;
+                    const labelDetail = typeof loc.label === 'string' ? loc.label.trim() : '';
+                    const stationDetail = typeof loc.station === 'string' ? loc.station.trim() : '';
+                    const normalizedCity = (cityName || '').trim().toLowerCase();
+
+                    let secondaryText = 'Sem detalhes adicionais';
+                    if (labelDetail && labelDetail.toLowerCase() !== normalizedCity) {
+                        secondaryText = labelDetail;
+                    } else if (stationDetail && stationDetail.toLowerCase() !== normalizedCity) {
+                        secondaryText = stationDetail;
+                    } else {
+                        const { secondary } = getLocationParts(labelDetail || stationDetail || cityName || '');
+                        if (secondary) {
+                            secondaryText = secondary;
+                        }
+                    }
+
                     return (
                         <div key={loc.id} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between">
                             <div className="flex items-center cursor-pointer" onClick={() => onSelectLocation(loc)}>
                                 <div className={`p-3 rounded-lg ${aqiInfo.bgColor} ${aqiInfo.color} mr-4`}>
-                                    <span className="font-bold text-xl">{loc.aqi}</span>
+                                    <span className="font-bold text-xl">{Number.isFinite(loc.aqi) ? loc.aqi : '--'}</span>
                                 </div>
                                 <div>
-                                    <div className="font-semibold">{loc.name.split(',')[0]}</div>
-                                    <div className="text-sm text-gray-400">{loc.name.split(',')[1]}</div>
+                                    <div className="font-semibold">{cityName || 'Local desconhecido'}</div>
+                                    <div className="text-sm text-gray-400">{secondaryText}</div>
                                 </div>
                             </div>
                             <button onClick={() => onRemoveLocation(loc.id)} className="text-gray-500 hover:text-red-500">
@@ -328,15 +373,8 @@ const SearchScreen = ({ savedLocations, onAddLocation }) => {
                                     Lat: {loc.lat.toFixed(2)}, Lng: {loc.lng.toFixed(2)}
                                 </div>
                             </div>
-                            <button 
-                                onClick={() => onAddLocation({
-                                    id: idx + 1000,
-                                    name: loc.name,
-                                    lat: loc.lat,
-                                    lng: loc.lng,
-                                    aqi: 0,
-                                    category: 'Desconhecido'
-                                })} 
+                            <button
+                                onClick={() => onAddLocation(loc)}
                                 className="text-blue-400 hover:text-blue-300"
                             >
                                 <Plus className="w-6 h-6" />
@@ -414,14 +452,88 @@ const BottomNav = ({ activePage, onNavigate }) => {
 // --- Componente Principal: App ---
 export default function App() {
     const [currentPage, setCurrentPage] = useState('home');
-    const [locations, setLocations] = useState(mockLocations);
-    const [currentLocation, setCurrentLocation] = useState(mockLocations[0]);
+    const [locations, setLocations] = useState(initialLocations);
+    const [currentLocation, setCurrentLocation] = useState(initialLocations[0]);
+    const [isLoadingCurrent, setIsLoadingCurrent] = useState(false);
+
+    const fetchAqiForLocation = useCallback(async (location) => {
+        if (!location) {
+            return location;
+        }
+
+        try {
+            const response = await fetch(
+                `${API_BASE_URL}/aqi/current?lat=${location.lat}&lng=${location.lng}`
+            );
+
+            if (!response.ok) {
+                throw new Error('Erro ao carregar dados de qualidade do ar.');
+            }
+
+            const data = await response.json();
+
+            const rawAqi = typeof data?.aqi === 'number'
+                ? data.aqi
+                : Number.parseInt(data?.aqi, 10);
+            const safeAqi = Number.isFinite(rawAqi) ? rawAqi : 0;
+            const apiLabel = typeof data?.location?.label === 'string' ? data.location.label.trim() : '';
+            const apiCity = typeof data?.location?.city === 'string' ? data.location.city.trim() : '';
+            const apiStation = typeof data?.location?.station === 'string' ? data.location.station.trim() : '';
+
+            const fallbackName = location.name || apiLabel || apiStation || 'Local desconhecido';
+            const sanitizedName = apiCity || fallbackName;
+            const normalizedLabel = apiLabel || location.label || fallbackName;
+            const stationLabel = apiStation || location.station;
+
+            return {
+                ...location,
+                name: sanitizedName,
+                label: normalizedLabel,
+                station: stationLabel,
+                lat: data?.location?.lat ?? location.lat,
+                lng: data?.location?.lng ?? location.lng,
+                aqi: safeAqi,
+                lastUpdated: data?.timestamp ?? null,
+                source: data?.source ?? 'waqi',
+                error: data?.error,
+            };
+        } catch (error) {
+            console.error('❌ Falha ao atualizar dados de AQI', error);
+            return {
+                ...location,
+                label: location.label || location.name,
+                station: location.station,
+                aqi: Number.isFinite(location.aqi) ? location.aqi : 0,
+                source: location?.source ?? 'indisponível',
+                error: 'Não foi possível atualizar os dados em tempo real.',
+            };
+        }
+    }, []);
+
+    useEffect(() => {
+        const bootstrapLocations = async () => {
+            setIsLoadingCurrent(true);
+            const updatedLocations = await Promise.all(
+                initialLocations.map(loc => fetchAqiForLocation(loc))
+            );
+            const sanitizedLocations = updatedLocations.filter(Boolean);
+
+            if (sanitizedLocations.length > 0) {
+                setLocations(sanitizedLocations);
+                setCurrentLocation(sanitizedLocations[0]);
+            }
+
+            setIsLoadingCurrent(false);
+        };
+
+        bootstrapLocations();
+    }, [fetchAqiForLocation]);
 
     // Função para renderizar a página correta
     const renderPage = () => {
         switch (currentPage) {
             case 'home':
-                return <HomeScreen location={currentLocation} />;
+                return <HomeScreen location={currentLocation} isLoading={isLoadingCurrent} />;
             case 'locations':
                 return <LocationsScreen 
                             locations={locations} 
@@ -436,21 +548,61 @@ export default function App() {
             case 'settings':
                 return <SettingsScreen />;
             default:
-                return <HomeScreen location={currentLocation} />;
+                return <HomeScreen location={currentLocation} isLoading={isLoadingCurrent} />;
         }
     };
 
     // --- Funções de Manipulação de Dados ---
-    const handleSelectLocation = (location) => {
-        setCurrentLocation(location);
-        setCurrentPage('home'); // Navega para a home para ver os detalhes
+    const handleSelectLocation = async (location) => {
+        if (!location) {
+            return;
+        }
+
+        setCurrentPage('home');
+        setIsLoadingCurrent(true);
+        const updatedLocation = await fetchAqiForLocation(location);
+        setIsLoadingCurrent(false);
+
+        if (!updatedLocation) {
+            return;
+        }
+
+        setCurrentLocation(updatedLocation);
+        setLocations(prev => prev.map(loc => (loc.id === updatedLocation.id ? updatedLocation : loc)));
     };
 
-    const handleAddLocation = (location) => {
-        if (!locations.some(loc => loc.id === location.id)) {
-            setLocations([location, ...locations]);
+    const handleAddLocation = async (location) => {
+        if (!location) {
+            return;
         }
-        setCurrentPage('locations'); // Navega para a lista de locais
+
+        const locationId = createLocationId(location.lat, location.lng);
+        const { primary: initialName } = getLocationParts(location.name);
+        const baseLocation = {
+            id: locationId,
+            name: initialName,
+            label: location.label ?? location.name ?? initialName,
+            station: location.station,
+            lat: location.lat,
+            lng: location.lng,
+            aqi: 0,
+        };
+
+        setIsLoadingCurrent(true);
+        const updatedLocation = await fetchAqiForLocation(baseLocation);
+        setIsLoadingCurrent(false);
+
+        if (!updatedLocation) {
+            return;
+        }
+
+        setLocations(prev => {
+            const filtered = prev.filter(loc => loc.id !== updatedLocation.id);
+            return [updatedLocation, ...filtered];
+        });
+
+        setCurrentLocation(updatedLocation);
+        setCurrentPage('locations');
     };
 
     const handleRemoveLocation = (id) => {

@@ -121,8 +121,12 @@ def test_location_structure():
     assert "lat" in location
     assert "lng" in location
     assert "label" in location
+    assert "city" in location
+    assert "station" in location
     assert location["lat"] == -23.55
     assert location["lng"] == -46.63
+    assert location["label"]
+    assert location["city"]
 
 def test_multiple_sources():
     """Testa que diferentes fontes podem ser usadas"""
@@ -144,7 +148,7 @@ def test_multiple_sources():
     # Pelo menos uma fonte deve funcionar
     assert len(sources_found) > 0
     
-    # Fontes válidas
-    valid_sources = ["open-meteo", "waqi", "openweather", "api-ninjas", "openaq", "mock"]
+    # Fontes válidas (apenas WAQI ou mock quando token não está configurado)
+    valid_sources = ["waqi", "mock"]
     for source in sources_found:
         assert source in valid_sources

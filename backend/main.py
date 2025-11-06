@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 from typing import Optional, Dict, List
+import unicodedata
 import httpx
 import os
 from dotenv import load_dotenv
@@ -262,6 +263,23 @@ if not WAQI_TOKEN:
 
 waqi = WAQIClient(WAQI_TOKEN) if WAQI_TOKEN else None
 nominatim = NominatimClient()
+
+FALLBACK_PLACES = [
+    {"name": "São Paulo, Brasil", "lat": -23.55, "lng": -46.63},
+    {"name": "Rio de Janeiro, Brasil", "lat": -22.91, "lng": -43.17},
+    {"name": "Brasília, Brasil", "lat": -15.7939, "lng": -47.8828},
+    {"name": "Lisboa, Portugal", "lat": 38.7223, "lng": -9.1393},
+    {"name": "Tóquio, Japão", "lat": 35.6762, "lng": 139.6503},
+    {"name": "Hong Kong, China", "lat": 22.3193, "lng": 114.1694},
+    {"name": "Dubai, Emirados Árabes Unidos", "lat": 25.2048, "lng": 55.2708},
+]
+
+
+def normalize_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFD", value or "").encode("ascii", "ignore").decode("ascii")
+    return normalized.lower().strip()
+
+
 aqi_service = AqiService()
 
 # ==================== ROTAS ====================
@@ -290,7 +308,11 @@ async def health_check():
         "status": "ok",
         "waqi_configured": bool(WAQI_TOKEN),
         "cache_size": len(cache_store),
-        "message": "Obtenha token em https://aqicn.org/data-platform/token/" if not WAQI_TOKEN else "Sistema operacional"
+        "message": "Obtenha token em https://aqicn.org/data-platform/token/" if not WAQI_TOKEN else "Sistema operacional",
+        "apis": {
+            "waqi": "configurada" if WAQI_TOKEN else "mock",
+            "nominatim": "online"
+        }
     }
 
 @app.get("/places/search")
@@ -306,8 +328,19 @@ async def search_places(q: str = Query(..., min_length=1, description="Nome da c
         return cached
     
     results = await nominatim.search(q)
-    
+
     if not results:
+        normalized_query = normalize_text(q)
+        fallback_results = [
+            place
+            for place in FALLBACK_PLACES
+            if normalized_query in normalize_text(place["name"])
+        ]
+
+        if fallback_results:
+            set_cache(cache_key, fallback_results)
+            return fallback_results
+
         raise HTTPException(status_code=404, detail="Nenhum local encontrado")
     
     set_cache(cache_key, results)

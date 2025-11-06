@@ -28,12 +28,12 @@ const createLocationId = (lat, lng) => {
 
 // --- Dados iniciais para o aplicativo ---
 const initialLocations = [
-    { id: createLocationId(-23.55, -46.63), name: 'São Paulo, Brasil', lat: -23.55, lng: -46.63, aqi: 0 },
-    { id: createLocationId(35.68, 139.76), name: 'Tóquio, Japão', lat: 35.68, lng: 139.76, aqi: 0 },
-    { id: createLocationId(28.61, 77.2), name: 'Nova Deli, Índia', lat: 28.61, lng: 77.20, aqi: 0 },
-    { id: createLocationId(39.9, 116.4), name: 'Pequim, China', lat: 39.90, lng: 116.40, aqi: 0 },
-    { id: createLocationId(34.05, -118.24), name: 'Los Angeles, EUA', lat: 34.05, lng: -118.24, aqi: 0 },
-    { id: createLocationId(-25.42, -49.27), name: 'Curitiba, Brasil', lat: -25.42, lng: -49.27, aqi: 0 },
+    { id: createLocationId(-23.55, -46.63), name: 'São Paulo', label: 'São Paulo, Brasil', lat: -23.55, lng: -46.63, aqi: 0 },
+    { id: createLocationId(35.68, 139.76), name: 'Tóquio', label: 'Tóquio, Japão', lat: 35.68, lng: 139.76, aqi: 0 },
+    { id: createLocationId(28.61, 77.2), name: 'Nova Deli', label: 'Nova Deli, Índia', lat: 28.61, lng: 77.20, aqi: 0 },
+    { id: createLocationId(39.9, 116.4), name: 'Pequim', label: 'Pequim, China', lat: 39.90, lng: 116.40, aqi: 0 },
+    { id: createLocationId(34.05, -118.24), name: 'Los Angeles', label: 'Los Angeles, EUA', lat: 34.05, lng: -118.24, aqi: 0 },
+    { id: createLocationId(-25.42, -49.27), name: 'Curitiba', label: 'Curitiba, Brasil', lat: -25.42, lng: -49.27, aqi: 0 },
 ];
 
 const getLocationParts = (name = '') => {
@@ -76,10 +76,10 @@ const MapCard = ({ location, isLoading }) => {
     const [isLeafletReady, setIsLeafletReady] = useState(false);
 
     const aqiInfo = getAqiInfo(location.aqi);
-    const { primary: primaryName } = getLocationParts(location.name);
+    const { primary: primaryName } = getLocationParts(location.name ?? location.label);
     const mapCoords = [location.lat ?? 0, location.lng ?? 0];
     const displayAqi = Number.isFinite(location.aqi) ? location.aqi : '--';
-    const locationLabel = location?.name || 'Local desconhecido';
+    const locationLabel = location?.label || location?.station || location?.name || 'Local desconhecido';
     const defaultZoom = 13;
 
     useEffect(() => {
@@ -269,7 +269,23 @@ const LocationsScreen = ({ locations, onSelectLocation, onRemoveLocation }) => {
             <div className="space-y-3">
                 {locations.map(loc => {
                     const aqiInfo = getAqiInfo(loc.aqi);
-                    const { primary, secondary } = getLocationParts(loc.name);
+                    const cityName = loc.name || getLocationParts(loc.label ?? '').primary;
+                    const labelDetail = typeof loc.label === 'string' ? loc.label.trim() : '';
+                    const stationDetail = typeof loc.station === 'string' ? loc.station.trim() : '';
+                    const normalizedCity = (cityName || '').trim().toLowerCase();
+
+                    let secondaryText = 'Sem detalhes adicionais';
+                    if (labelDetail && labelDetail.toLowerCase() !== normalizedCity) {
+                        secondaryText = labelDetail;
+                    } else if (stationDetail && stationDetail.toLowerCase() !== normalizedCity) {
+                        secondaryText = stationDetail;
+                    } else {
+                        const { secondary } = getLocationParts(labelDetail || stationDetail || cityName || '');
+                        if (secondary) {
+                            secondaryText = secondary;
+                        }
+                    }
+
                     return (
                         <div key={loc.id} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between">
                             <div className="flex items-center cursor-pointer" onClick={() => onSelectLocation(loc)}>
@@ -277,8 +293,8 @@ const LocationsScreen = ({ locations, onSelectLocation, onRemoveLocation }) => {
                                     <span className="font-bold text-xl">{Number.isFinite(loc.aqi) ? loc.aqi : '--'}</span>
                                 </div>
                                 <div>
-                                    <div className="font-semibold">{primary}</div>
-                                    <div className="text-sm text-gray-400">{secondary || 'Sem detalhes adicionais'}</div>
+                                    <div className="font-semibold">{cityName || 'Local desconhecido'}</div>
+                                    <div className="text-sm text-gray-400">{secondaryText}</div>
                                 </div>
                             </div>
                             <button onClick={() => onRemoveLocation(loc.id)} className="text-gray-500 hover:text-red-500">
@@ -476,6 +492,8 @@ export default function App() {
             console.error('❌ Falha ao atualizar dados de AQI', error);
             return {
                 ...location,
+                label: location.label || location.name,
+                station: location.station,
                 aqi: Number.isFinite(location.aqi) ? location.aqi : 0,
                 source: location?.source ?? 'indisponível',
                 error: 'Não foi possível atualizar os dados em tempo real.',
@@ -550,9 +568,12 @@ export default function App() {
         }
 
         const locationId = createLocationId(location.lat, location.lng);
+        const { primary: initialName } = getLocationParts(location.name);
         const baseLocation = {
             id: locationId,
-            name: location.name,
+            name: initialName,
+            label: location.label ?? location.name ?? initialName,
+            station: location.station,
             lat: location.lat,
             lng: location.lng,
             aqi: 0,

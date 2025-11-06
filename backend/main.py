@@ -570,6 +570,13 @@ FALLBACK_PLACES = [
     {"name": "São Paulo, Brasil", "lat": -23.55, "lng": -46.63},
     {"name": "Rio de Janeiro, Brasil", "lat": -22.91, "lng": -43.17},
     {"name": "Brasília, Brasil", "lat": -15.7939, "lng": -47.8828},
+    {"name": "Porto Alegre, Brasil", "lat": -30.0346, "lng": -51.2177},
+    {"name": "Curitiba, Brasil", "lat": -25.4284, "lng": -49.2733},
+    {"name": "Belo Horizonte, Brasil", "lat": -19.9167, "lng": -43.9345},
+    {"name": "Salvador, Brasil", "lat": -12.9777, "lng": -38.5016},
+    {"name": "Recife, Brasil", "lat": -8.0476, "lng": -34.8770},
+    {"name": "Fortaleza, Brasil", "lat": -3.7319, "lng": -38.5267},
+    {"name": "Manaus, Brasil", "lat": -3.1190, "lng": -60.0217},
     {"name": "Lisboa, Portugal", "lat": 38.7223, "lng": -9.1393},
     {"name": "Tóquio, Japão", "lat": 35.6762, "lng": 139.6503},
     {"name": "Hong Kong, China", "lat": 22.3193, "lng": 114.1694},
@@ -665,11 +672,15 @@ def resolve_fallback_results(query: str) -> List[Dict]:
     if city_matches and not country_part:
         return city_matches
 
-    if country_part and country_part in COUNTRY_CAPITALS:
-        return [COUNTRY_CAPITALS[country_part]]
+    is_country_only_query = (
+        len(query_parts) == 1 and not exact_matches and not city_matches
+    )
 
-    if not country_part and normalized_query in COUNTRY_CAPITALS:
-        return [COUNTRY_CAPITALS[normalized_query]]
+    if is_country_only_query:
+        if normalized_query in COUNTRY_CAPITALS:
+            return [COUNTRY_CAPITALS[normalized_query]]
+        if city_part in COUNTRY_CAPITALS:
+            return [COUNTRY_CAPITALS[city_part]]
 
     partial_matches = [
         place

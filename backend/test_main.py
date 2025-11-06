@@ -24,6 +24,20 @@ def test_search_places_sao_paulo():
     assert "lat" in data[0]
     assert "lng" in data[0]
 
+
+def test_search_country_redirects_to_capital():
+    """Testa se busca por país retorna a capital"""
+    response = client.get("/places/search?q=Brasil")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) == 1
+    place = data[0]
+    assert place["name"] == "Brasília"
+    assert place["label"] == "Brasília, Brasil"
+    assert pytest.approx(place["lat"], rel=1e-4) == -15.7939
+    assert pytest.approx(place["lng"], rel=1e-4) == -47.8828
+
 def test_search_places_empty():
     """Testa busca vazia"""
     response = client.get("/places/search?q=")
@@ -153,8 +167,12 @@ def test_location_structure():
     assert "lat" in location
     assert "lng" in location
     assert "label" in location
+    assert "city" in location
+    assert "station" in location
     assert location["lat"] == -23.55
     assert location["lng"] == -46.63
+    assert location["label"]
+    assert location["city"]
 
 def test_multiple_sources():
     """Testa que diferentes fontes podem ser usadas"""
@@ -176,7 +194,7 @@ def test_multiple_sources():
     # Pelo menos uma fonte deve funcionar
     assert len(sources_found) > 0
     
-    # Fontes válidas
-    valid_sources = ["open-meteo", "waqi", "openweather", "api-ninjas", "openaq", "mock"]
+    # Fontes válidas (apenas WAQI ou mock quando token não está configurado)
+    valid_sources = ["waqi", "mock"]
     for source in sources_found:
         assert source in valid_sources

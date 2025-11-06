@@ -337,27 +337,38 @@ const SearchScreen = ({ savedLocations, onAddLocation }) => {
         setResults([]);
 
         try {
-            const response = await fetch(`${API_BASE_URL}/places/search?q=${encodeURIComponent(term)}`);
+            const res = await fetch(`http://localhost:8000/places/search?q=${encodeURIComponent(searchTerm)}`);
+            if (!res.ok) throw new Error('Erro ao buscar local');
+            const data = await res.json();
+            const sanitizedResults = Array.isArray(data)
+                ? data
+                    .map((item) => {
+                        const lat = typeof item.lat === 'number' ? item.lat : Number(item.lat);
+                        const lng = typeof item.lng === 'number' ? item.lng : Number(item.lng);
 
-            if (!response.ok) {
-                throw new Error('Erro ao buscar local');
-            }
+                        if (Number.isNaN(lat) || Number.isNaN(lng)) {
+                            return null;
+                        }
 
-            const data = await response.json();
+                        return {
+                            id: item.id || generateLocationId(),
+                            name: item.name || 'Local desconhecido',
+                            lat,
+                            lng,
+                            aqi: typeof item.aqi === 'number' ? item.aqi : 0,
+                            category: item.category || 'Desconhecido',
+                        };
+                    })
+                    .filter(Boolean)
+                : [];
 
-            if (!Array.isArray(data) || data.length === 0) {
+            if (!sanitizedResults.length) {
                 setError('Nenhum local encontrado.');
+                setResults([]);
                 return;
             }
 
-            const normalized = data.map((item, index) => ({
-                ...item,
-                lat: typeof item.lat === 'string' ? Number.parseFloat(item.lat) : item.lat,
-                lng: typeof item.lng === 'string' ? Number.parseFloat(item.lng) : item.lng,
-                _internalId: item.id ?? `result-${index}`,
-            }));
-
-            setResults(normalized);
+            setResults(sanitizedResults);
         } catch (err) {
             console.error('Erro ao buscar localidade:', err);
             setError('Nenhum local encontrado.');
@@ -428,7 +439,7 @@ const SearchScreen = ({ savedLocations, onAddLocation }) => {
                             </div>
                             <button
                                 onClick={() => onAddLocation({
-                                    id: generateLocationId(),
+                                    id: loc.id || generateLocationId(),
                                     name: loc.name,
                                     lat: loc.lat,
                                     lng: loc.lng,

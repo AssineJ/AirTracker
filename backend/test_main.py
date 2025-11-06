@@ -24,6 +24,20 @@ def test_search_places_sao_paulo():
     assert "lat" in data[0]
     assert "lng" in data[0]
 
+
+def test_search_country_redirects_to_capital():
+    """Testa se busca por país retorna a capital"""
+    response = client.get("/places/search?q=Brasil")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) == 1
+    place = data[0]
+    assert place["name"] == "Brasília"
+    assert place["label"] == "Brasília, Brasil"
+    assert pytest.approx(place["lat"], rel=1e-4) == -15.7939
+    assert pytest.approx(place["lng"], rel=1e-4) == -47.8828
+
 def test_search_places_empty():
     """Testa busca vazia"""
     response = client.get("/places/search?q=")

@@ -5,15 +5,14 @@ import {
     MapPin, 
     Settings, 
     Wind, 
-    Menu, 
-    User, 
-    Leaf, 
-    X, 
-    ChevronRight, 
-    Plus, 
-    Check, 
-    Trash2,
-    History // Adicionado o ícone de Histórico
+    Menu,
+    User,
+    Leaf,
+    X,
+    ChevronRight,
+    Plus,
+    Check,
+    Trash2
 } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
@@ -314,18 +313,46 @@ const SearchScreen = ({ savedLocations, onAddLocation }) => {
     const [results, setResults] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [hasSearched, setHasSearched] = useState(false);
 
-    // Busca real na API FastAPI
     const handleSearch = async () => {
-        if (searchTerm.trim() === '') return;
+        const term = searchTerm.trim();
+        if (!term) {
+            setError('Digite o nome de uma cidade ou país.');
+            setResults([]);
+            setHasSearched(true);
+            return;
+        }
+
+        setHasSearched(true);
         setLoading(true);
         setError('');
+        setResults([]);
+
         try {
-            const res = await fetch(`http://localhost:8000/places/search?q=${encodeURIComponent(searchTerm)}`);
-            if (!res.ok) throw new Error('Erro ao buscar local');
-            const data = await res.json();
-            setResults(data);
+            const response = await fetch(`${API_BASE_URL}/places/search?q=${encodeURIComponent(term)}`);
+
+            if (!response.ok) {
+                throw new Error('Erro ao buscar local');
+            }
+
+            const data = await response.json();
+
+            if (!Array.isArray(data) || data.length === 0) {
+                setError('Nenhum local encontrado.');
+                return;
+            }
+
+            const normalized = data.map((item, index) => ({
+                ...item,
+                lat: typeof item.lat === 'string' ? Number.parseFloat(item.lat) : item.lat,
+                lng: typeof item.lng === 'string' ? Number.parseFloat(item.lng) : item.lng,
+                _internalId: item.id ?? `result-${index}`,
+            }));
+
+            setResults(normalized);
         } catch (err) {
+            console.error('Erro ao buscar localidade:', err);
             setError('Nenhum local encontrado.');
             setResults([]);
         } finally {
@@ -333,54 +360,76 @@ const SearchScreen = ({ savedLocations, onAddLocation }) => {
         }
     };
 
+    const isSaved = (candidate) => {
+        return savedLocations.some((loc) => {
+            const sameLat = Math.abs(loc.lat - candidate.lat) < 0.0001;
+            const sameLng = Math.abs(loc.lng - candidate.lng) < 0.0001;
+            return sameLat && sameLng;
+        });
+    };
+
     return (
         <div className="p-4">
-            <div className="flex justify-between items-center mb-4">
+            <div className="mb-4">
                 <h1 className="text-xl font-bold">Buscar Localidade</h1>
-                <button className="text-gray-400 hover:text-white" title="Histórico de Busca">
-                    <History className="w-6 h-6" />
-                </button>
+                <p className="text-sm text-gray-400 mt-1">
+                    Pesquise cidades ou países. Ao informar apenas o país, a capital será sugerida automaticamente.
+                </p>
             </div>
-            
+
             <div className="relative mb-4">
-                <input 
+                <input
                     type="text"
-                    placeholder="Digite o nome da cidade..."
+                    placeholder="Digite o nome da cidade ou país..."
                     className="w-full bg-gray-700 rounded-full py-3 px-5 pr-12 text-white placeholder-gray-400"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                 />
-                <button 
-                    onClick={handleSearch} 
+                <button
+                    onClick={handleSearch}
                     className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-blue-400"
                 >
                     <Search className="w-5 h-5" />
                 </button>
             </div>
 
-            {/* Resultados */}
             {loading && <p className="text-gray-400 text-sm">Carregando...</p>}
-            {error && <p className="text-gray-400 text-sm">{error}</p>}
+            {!loading && error && <p className="text-gray-400 text-sm">{error}</p>}
 
-            {!loading && !error && results.length > 0 && (
+            {!loading && hasSearched && !error && results.length === 0 && (
+                <p className="text-sm text-gray-500">Nenhum resultado. Tente outro termo.</p>
+            )}
+
+            {!loading && results.length > 0 && (
                 <div className="space-y-3">
-                    {results.map((loc, idx) => (
-                        <div key={idx} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between">
-                            <div>
-                                <div className="font-semibold">{loc.name}</div>
-                                <div className="text-sm text-gray-400">
-                                    Lat: {loc.lat.toFixed(2)}, Lng: {loc.lng.toFixed(2)}
+                    {results.map((loc) => {
+                        const primaryName = loc.name || getLocationParts(loc.label ?? '').primary;
+                        const { secondary } = getLocationParts(loc.label ?? loc.name ?? '');
+                        const alreadySaved = isSaved(loc);
+
+                        return (
+                            <div key={loc._internalId} className="bg-gray-800 p-4 rounded-xl flex items-center justify-between">
+                                <div>
+                                    <div className="font-semibold">{primaryName || 'Local sem nome'}</div>
+                                    <div className="text-sm text-gray-400">
+                                        {secondary || 'Coordenadas aproximadas'}
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-1">
+                                        Lat: {Number.isFinite(loc.lat) ? loc.lat.toFixed(2) : '--'}, Lng: {Number.isFinite(loc.lng) ? loc.lng.toFixed(2) : '--'}
+                                    </div>
                                 </div>
+                                <button
+                                    onClick={() => !alreadySaved && onAddLocation(loc)}
+                                    className={`flex items-center justify-center w-10 h-10 rounded-full border transition ${alreadySaved ? 'border-gray-600 text-gray-500 cursor-not-allowed' : 'border-blue-400 text-blue-400 hover:text-blue-300 hover:border-blue-300'}`}
+                                    disabled={alreadySaved}
+                                    title={alreadySaved ? 'Local já salvo' : 'Salvar local'}
+                                >
+                                    <Plus className="w-5 h-5" />
+                                </button>
                             </div>
-                            <button
-                                onClick={() => onAddLocation(loc)}
-                                className="text-blue-400 hover:text-blue-300"
-                            >
-                                <Plus className="w-6 h-6" />
-                            </button>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
         </div>
@@ -390,25 +439,89 @@ const SearchScreen = ({ savedLocations, onAddLocation }) => {
 
 // --- Tela 4: Configurações (Settings) ---
 const SettingsScreen = () => {
-    const SettingItem = ({ icon, name }) => (
-        <div className="bg-gray-800 p-4 rounded-xl flex items-center justify-between cursor-pointer hover:bg-gray-700">
-            <div className="flex items-center">
-                {icon}
-                <span className="ml-4 font-medium">{name}</span>
-            </div>
-            <ChevronRight className="w-5 h-5 text-gray-500" />
-        </div>
-    );
+    const [showNotificationDialog, setShowNotificationDialog] = useState(false);
+    const [notificationPreference, setNotificationPreference] = useState(null);
+
+    const handleNotificationChoice = (shouldEnable) => {
+        setNotificationPreference(shouldEnable ? 'Notificações ativadas' : 'Notificações desativadas');
+        setShowNotificationDialog(false);
+    };
 
     return (
         <div className="p-4">
             <h1 className="text-xl font-bold mb-4">Configurações</h1>
             <div className="space-y-3">
-                {/* Item "Minha Conta" removido */}
-                <SettingItem icon={<Wind className="w-5 h-5 text-gray-400" />} name="Unidades (AQI, °C)" />
-                <SettingItem icon={<Settings className="w-5 h-5 text-gray-400" />} name="Notificações" />
-                <SettingItem icon={<Leaf className="w-5 h-5 text-gray-400" />} name="Sobre o AirCheck" />
+                <div className="bg-gray-800 p-4 rounded-xl">
+                    <div className="flex items-start">
+                        <Wind className="w-5 h-5 text-gray-400 mt-1" />
+                        <div className="ml-4">
+                            <p className="font-semibold">Unidades</p>
+                            <p className="text-sm text-gray-400 mt-1">Qualidade do ar apresentada no padrão AQI (World Air Quality Index).</p>
+                            <p className="text-sm text-gray-400">Temperaturas exibidas em graus Celsius (°C).</p>
+                        </div>
+                    </div>
+                </div>
+
+                <button
+                    onClick={() => setShowNotificationDialog(true)}
+                    className="w-full bg-gray-800 p-4 rounded-xl flex items-center justify-between hover:bg-gray-700 transition"
+                >
+                    <div className="flex items-start text-left">
+                        <Settings className="w-5 h-5 text-gray-400 mt-1" />
+                        <div className="ml-4">
+                            <p className="font-semibold">Notificações</p>
+                            <p className="text-sm text-gray-400">Receba alertas quando a qualidade do ar mudar de forma significativa.</p>
+                            {notificationPreference && (
+                                <p className="text-xs text-gray-500 mt-2">{notificationPreference}</p>
+                            )}
+                        </div>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-500" />
+                </button>
+
+                <div className="bg-gray-800 p-4 rounded-xl">
+                    <div className="flex items-start">
+                        <Leaf className="w-5 h-5 text-gray-400 mt-1" />
+                        <div className="ml-4">
+                            <p className="font-semibold">Sobre o AirCheck</p>
+                            <p className="text-sm text-gray-400 mt-1">
+                                O AirCheck ajuda você a monitorar a qualidade do ar em tempo real usando dados da rede WAQI.
+                                Salve cidades importantes, acompanhe mapas interativos e receba recomendações para proteger sua saúde.
+                            </p>
+                        </div>
+                    </div>
+                </div>
             </div>
+
+            {showNotificationDialog && (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
+                    <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4">
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <h2 className="text-lg font-semibold">Adicionar notificações?</h2>
+                                <p className="text-sm text-gray-400 mt-1">Deseja receber avisos quando houver alterações relevantes na qualidade do ar?</p>
+                            </div>
+                            <button onClick={() => setShowNotificationDialog(false)} className="text-gray-500 hover:text-gray-300">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => handleNotificationChoice(true)}
+                                className="flex-1 bg-blue-500 hover:bg-blue-400 text-white font-semibold py-2 rounded-xl"
+                            >
+                                Sim
+                            </button>
+                            <button
+                                onClick={() => handleNotificationChoice(false)}
+                                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 rounded-xl"
+                            >
+                                Não
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -476,11 +589,20 @@ export default function App() {
                 ? data.aqi
                 : Number.parseInt(data?.aqi, 10);
             const safeAqi = Number.isFinite(rawAqi) ? rawAqi : 0;
-            const apiLabel = data?.location?.label?.trim();
+            const apiLabel = typeof data?.location?.label === 'string' ? data.location.label.trim() : '';
+            const apiCity = typeof data?.location?.city === 'string' ? data.location.city.trim() : '';
+            const apiStation = typeof data?.location?.station === 'string' ? data.location.station.trim() : '';
+
+            const fallbackName = location.name || apiLabel || apiStation || 'Local desconhecido';
+            const sanitizedName = apiCity || fallbackName;
+            const normalizedLabel = apiLabel || location.label || fallbackName;
+            const stationLabel = apiStation || location.station;
 
             return {
                 ...location,
-                name: apiLabel && apiLabel.length > 0 ? apiLabel : location.name,
+                name: sanitizedName,
+                label: normalizedLabel,
+                station: stationLabel,
                 lat: data?.location?.lat ?? location.lat,
                 lng: data?.location?.lng ?? location.lng,
                 aqi: safeAqi,

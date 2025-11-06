@@ -103,6 +103,139 @@ class NominatimClient:
             {"name": "Dubai", "lat": 25.276987, "lng": 55.296249},
         ]
 
+        raw_country_capitals: List[Dict[str, object]] = [
+            {
+                "aliases": ["brasil", "brazil", "republica federativa do brasil"],
+                "city": "Brasília",
+                "country": "Brasil",
+                "lat": -15.793889,
+                "lng": -47.882778,
+            },
+            {
+                "aliases": ["estados unidos", "united states", "usa", "united states of america"],
+                "city": "Washington, D.C.",
+                "country": "Estados Unidos",
+                "lat": 38.907192,
+                "lng": -77.036873,
+            },
+            {
+                "aliases": ["reino unido", "united kingdom", "uk", "great britain", "inglaterra"],
+                "city": "Londres",
+                "country": "Reino Unido",
+                "lat": 51.507351,
+                "lng": -0.127758,
+            },
+            {
+                "aliases": ["franca", "france", "republica francesa"],
+                "city": "Paris",
+                "country": "França",
+                "lat": 48.856613,
+                "lng": 2.352222,
+            },
+            {
+                "aliases": ["japao", "japan", "nihon"],
+                "city": "Tóquio",
+                "country": "Japão",
+                "lat": 35.689487,
+                "lng": 139.691711,
+            },
+            {
+                "aliases": ["china", "república popular da china", "people's republic of china"],
+                "city": "Pequim",
+                "country": "China",
+                "lat": 39.904202,
+                "lng": 116.407394,
+            },
+            {
+                "aliases": ["india", "índia", "bharat"],
+                "city": "Nova Deli",
+                "country": "Índia",
+                "lat": 28.613939,
+                "lng": 77.209023,
+            },
+            {
+                "aliases": ["emirados arabes unidos", "united arab emirates", "uae"],
+                "city": "Abu Dhabi",
+                "country": "Emirados Árabes Unidos",
+                "lat": 24.453884,
+                "lng": 54.3773438,
+            },
+            {
+                "aliases": ["coreia do sul", "south korea", "republic of korea"],
+                "city": "Seul",
+                "country": "Coreia do Sul",
+                "lat": 37.566536,
+                "lng": 126.977966,
+            },
+            {
+                "aliases": ["canada", "canadá"],
+                "city": "Ottawa",
+                "country": "Canadá",
+                "lat": 45.421532,
+                "lng": -75.697189,
+            },
+            {
+                "aliases": ["australia", "austrália"],
+                "city": "Canberra",
+                "country": "Austrália",
+                "lat": -35.280937,
+                "lng": 149.130009,
+            },
+            {
+                "aliases": ["alemanha", "germany", "deutschland"],
+                "city": "Berlim",
+                "country": "Alemanha",
+                "lat": 52.520008,
+                "lng": 13.404954,
+            },
+            {
+                "aliases": ["italia", "itália", "italy"],
+                "city": "Roma",
+                "country": "Itália",
+                "lat": 41.902782,
+                "lng": 12.496366,
+            },
+            {
+                "aliases": ["portugal", "republica portuguesa"],
+                "city": "Lisboa",
+                "country": "Portugal",
+                "lat": 38.722252,
+                "lng": -9.139337,
+            },
+            {
+                "aliases": ["espanha", "spain", "reino de espanha"],
+                "city": "Madri",
+                "country": "Espanha",
+                "lat": 40.416775,
+                "lng": -3.70379,
+            },
+            {
+                "aliases": ["argentina", "republica argentina"],
+                "city": "Buenos Aires",
+                "country": "Argentina",
+                "lat": -34.603722,
+                "lng": -58.381592,
+            },
+            {
+                "aliases": ["mexico", "méxico", "estados unidos mexicanos"],
+                "city": "Cidade do México",
+                "country": "México",
+                "lat": 19.432608,
+                "lng": -99.133209,
+            },
+        ]
+
+        self._country_capitals = [
+            {
+                "aliases": {self._normalize_text(alias) for alias in entry["aliases"]},
+                "city": entry["city"],
+                "country": entry["country"],
+                "lat": entry["lat"],
+                "lng": entry["lng"],
+            }
+            for entry in raw_country_capitals
+        ]
+
     @staticmethod
     def _normalize_text(value: str) -> str:
         return (
@@ -119,12 +252,36 @@ class NominatimClient:
             return []
 
         matches = [
-            place for place in self._fallback_places
+            {
+                **place,
+                "label": place.get("label") or str(place.get("name", "")),
+            }
+            for place in self._fallback_places
             if normalized_query in self._normalize_text(str(place["name"]))
         ]
         return matches
 
+    def _match_country_capital(self, query: str) -> Optional[Dict]:
+        normalized_query = self._normalize_text(query)
+        if not normalized_query:
+            return None
+
+        for entry in self._country_capitals:
+            if normalized_query in entry["aliases"]:
+                label = f"{entry['city']}, {entry['country']}"
+                return {
+                    "name": entry["city"],
+                    "label": label,
+                    "lat": entry["lat"],
+                    "lng": entry["lng"],
+                }
+        return None
+
     async def search(self, query: str) -> List[Dict]:
+        country_match = self._match_country_capital(query)
+        if country_match:
+            return [country_match]
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
@@ -137,10 +294,13 @@ class NominatimClient:
                 results = response.json()
                 normalized_results = [
                     {
-                        "name": r.get("display_name", "")
-                            .split(",")[0]  # pega só o primeiro nome (mais limpo)
+                        "name": (
+                            r.get("display_name", "")
+                            .split(",")[0]
                             .encode("ascii", errors="ignore")
-                            .decode("ascii"),  # remove caracteres não ASCII
+                            .decode("ascii")
+                        ),
+                        "label": r.get("display_name", ""),
                         "lat": float(r["lat"]),
                         "lng": float(r["lon"])
                     }

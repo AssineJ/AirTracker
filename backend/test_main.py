@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from main import app
+from main import app, cache_store, nominatim
 
 client = TestClient(app)
 
@@ -28,6 +28,70 @@ def test_search_places_empty():
     """Testa busca vazia"""
     response = client.get("/places/search?q=")
     assert response.status_code == 422  # Validation error
+
+
+def test_fallback_prefers_specific_brazilian_city(monkeypatch):
+    """Quando Nominatim falha, deve respeitar a cidade informada."""
+
+    async def fake_search(query: str):
+        return []
+
+    cache_store.clear()
+    monkeypatch.setattr(nominatim, "search", fake_search)
+
+    response = client.get("/places/search?q=Rio de Janeiro, Brasil")
+    assert response.status_code == 200
+    data = response.json()
+    assert data
+    assert data[0]["name"].startswith("Rio de Janeiro")
+
+
+def test_fallback_handles_brasilia_query(monkeypatch):
+    """Brasília não deve ser trocada por outra cidade ao usar fallback."""
+
+    async def fake_search(query: str):
+        return []
+
+    cache_store.clear()
+    monkeypatch.setattr(nominatim, "search", fake_search)
+
+    response = client.get("/places/search?q=Brasilia")
+    assert response.status_code == 200
+    data = response.json()
+    assert data
+    assert data[0]["name"].startswith("Brasília")
+
+
+def test_fallback_handles_porto_alegre(monkeypatch):
+    """Porto Alegre deve permanecer a cidade buscada quando Nominatim falhar."""
+
+    async def fake_search(query: str):
+        return []
+
+    cache_store.clear()
+    monkeypatch.setattr(nominatim, "search", fake_search)
+
+    response = client.get("/places/search?q=Porto Alegre, Brasil")
+    assert response.status_code == 200
+    data = response.json()
+    assert data
+    assert data[0]["name"].startswith("Porto Alegre")
+
+
+def test_country_query_returns_capital(monkeypatch):
+    """Consulta apenas com o país deve direcionar para a capital conhecida."""
+
+    async def fake_search(query: str):
+        return []
+
+    cache_store.clear()
+    monkeypatch.setattr(nominatim, "search", fake_search)
+
+    response = client.get("/places/search?q=Brasil")
+    assert response.status_code == 200
+    data = response.json()
+    assert data
+    assert data[0]["name"].startswith("Brasília")
 
 def test_get_aqi_sao_paulo():
     """Testa obtenção de AQI"""

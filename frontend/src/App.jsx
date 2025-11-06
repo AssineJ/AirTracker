@@ -352,14 +352,26 @@ const SearchScreen = ({ savedLocations, onAddLocation }) => {
 
 // --- Tela 4: Configurações (Settings) ---
 const SettingsScreen = () => {
-    const SettingItem = ({ icon, name }) => (
-        <div className="bg-gray-800 p-4 rounded-xl flex items-center justify-between cursor-pointer hover:bg-gray-700">
-            <div className="flex items-center">
-                {icon}
+    const [modalInfo, setModalInfo] = useState(null);
+
+    const openModal = (title, description, Icon) => {
+        setModalInfo({ title, description, Icon });
+    };
+
+    const closeModal = () => setModalInfo(null);
+
+    const SettingItem = ({ Icon, name, description }) => (
+        <button
+            type="button"
+            onClick={() => openModal(name, description, Icon)}
+            className="w-full bg-gray-800 p-4 rounded-xl flex items-center justify-between cursor-pointer hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+            <div className="flex items-center text-left">
+                <Icon className="w-5 h-5 text-gray-400" />
                 <span className="ml-4 font-medium">{name}</span>
             </div>
             <ChevronRight className="w-5 h-5 text-gray-500" />
-        </div>
+        </button>
     );
 
     return (
@@ -367,10 +379,56 @@ const SettingsScreen = () => {
             <h1 className="text-xl font-bold mb-4">Configurações</h1>
             <div className="space-y-3">
                 {/* Item "Minha Conta" removido */}
-                <SettingItem icon={<Wind className="w-5 h-5 text-gray-400" />} name="Unidades (AQI, °C)" />
-                <SettingItem icon={<Settings className="w-5 h-5 text-gray-400" />} name="Notificações" />
-                <SettingItem icon={<Leaf className="w-5 h-5 text-gray-400" />} name="Sobre o AirCheck" />
+                <SettingItem
+                    Icon={Wind}
+                    name="Unidades (AQI, °C)"
+                    description="Qualidade do ar apresentada no padrão AQI (World Air Quality Index). Temperaturas exibidas em graus Celsius (°C)."
+                />
+                <SettingItem
+                    Icon={Settings}
+                    name="Notificações"
+                    description="Receba alertas quando a qualidade do ar mudar de forma significativa."
+                />
+                <SettingItem
+                    Icon={Leaf}
+                    name="Sobre o AirCheck"
+                    description="O AirCheck ajuda você a monitorar a qualidade do ar em tempo real usando dados da rede WAQI. Salve cidades importantes, acompanhe mapas interativos e receba recomendações para proteger sua saúde."
+                />
             </div>
+
+            {modalInfo && (
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50" role="presentation">
+                    <div
+                        className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-11/12 max-w-md shadow-2xl relative"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="settings-modal-title"
+                    >
+                        <button
+                            type="button"
+                            onClick={closeModal}
+                            className="absolute top-4 right-4 text-gray-400 hover:text-white"
+                            aria-label="Fechar"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                        <div className="flex items-center mb-4">
+                            <modalInfo.Icon className="w-5 h-5 text-blue-400 mr-2" />
+                            <h2 id="settings-modal-title" className="text-lg font-semibold">{modalInfo.title}</h2>
+                        </div>
+                        <p className="text-sm text-gray-300 leading-relaxed">{modalInfo.description}</p>
+                        <div className="mt-6 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={closeModal}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium"
+                            >
+                                Entendi
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

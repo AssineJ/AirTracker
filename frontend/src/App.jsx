@@ -476,20 +476,11 @@ export default function App() {
                 ? data.aqi
                 : Number.parseInt(data?.aqi, 10);
             const safeAqi = Number.isFinite(rawAqi) ? rawAqi : 0;
-            const apiLabel = typeof data?.location?.label === 'string' ? data.location.label.trim() : '';
-            const apiCity = typeof data?.location?.city === 'string' ? data.location.city.trim() : '';
-            const apiStation = typeof data?.location?.station === 'string' ? data.location.station.trim() : '';
-
-            const fallbackName = location.name || apiLabel || apiStation || 'Local desconhecido';
-            const sanitizedName = apiCity || fallbackName;
-            const normalizedLabel = apiLabel || location.label || fallbackName;
-            const stationLabel = apiStation || location.station;
+            const apiLabel = data?.location?.label?.trim();
 
             return {
                 ...location,
-                name: sanitizedName,
-                label: normalizedLabel,
-                station: stationLabel,
+                name: apiLabel && apiLabel.length > 0 ? apiLabel : location.name,
                 lat: data?.location?.lat ?? location.lat,
                 lng: data?.location?.lng ?? location.lng,
                 aqi: safeAqi,
